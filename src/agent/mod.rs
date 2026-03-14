@@ -235,6 +235,7 @@ Workspace: {}"#,
             user_message.to_string(),
             request_id,
             prev_message_id,
+            None,
         ));
 
         for _ in 0..self.definition.max_iterations {

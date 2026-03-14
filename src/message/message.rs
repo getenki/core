@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) struct Message {
     pub(crate) message_id: String,
     pub(crate) prev_message_id: Option<String>,
+    sender: String,
     payload: Value,
 }
 
@@ -18,6 +19,7 @@ impl Message {
         Self {
             message_id: Self::next_message_id(),
             prev_message_id: None,
+            sender: "system".to_string(),
             payload: json!({
                 "role": "system",
                 "content": content
@@ -29,10 +31,12 @@ impl Message {
         content: String,
         request_id: String,
         prev_message_id: Option<String>,
+        user_id: Option<String>,
     ) -> Self {
         Self {
             message_id: Self::next_message_id(),
             prev_message_id,
+            sender: user_id.unwrap_or_else(|| "user".to_string()),
             payload: json!({
                 "role": "user",
                 "content": content,
@@ -42,9 +46,16 @@ impl Message {
     }
 
     pub(crate) fn out(payload: Value, prev_message_id: Option<String>) -> Self {
+        let sender = payload
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("assistant")
+            .to_string();
+
         Self {
             message_id: Self::next_message_id(),
             prev_message_id,
+            sender,
             payload,
         }
     }
@@ -64,6 +75,7 @@ impl From<Message> for Value {
     fn from(message: Message) -> Self {
         let mut value = json!({
             "message_id": message.message_id,
+            "sender": message.sender,
             "payload": message.payload
         });
 
@@ -89,20 +101,32 @@ impl TryFrom<IndexedValue> for Message {
             .get("prev_message_id")
             .and_then(Value::as_str)
             .map(str::to_string);
+        let sender = value
+            .get("sender")
+            .and_then(Value::as_str)
+            .map(str::to_string);
 
         if let Some(payload) = value.get("payload").cloned() {
             return Ok(Self {
                 message_id,
                 prev_message_id,
+                sender: sender.unwrap_or_else(|| {
+                    payload
+                        .get("role")
+                        .and_then(Value::as_str)
+                        .unwrap_or("assistant")
+                        .to_string()
+                }),
                 payload,
             });
         }
 
-        value.get("role").and_then(Value::as_str).ok_or(())?;
+        let role = value.get("role").and_then(Value::as_str).ok_or(())?;
 
         Ok(Self {
             message_id: format!("legacy-msg-{index}"),
             prev_message_id: None,
+            sender: role.to_string(),
             payload: value,
         })
     }
