@@ -44,14 +44,20 @@ pub trait ToolExecutor {
         tool_name: &str,
         args: &Value,
         ctx: &ToolContext,
+        tool_call_id: Option<&str>,
     ) -> Value {
         let content = self.execute(registry, tool_name, args, ctx);
-
-        json!({
+        let mut message = json!({
             "role": "tool",
             "tool_name": tool_name,
             "content": content
-        })
+        });
+
+        if let Some(tool_call_id) = tool_call_id {
+            message["tool_call_id"] = Value::String(tool_call_id.to_string());
+        }
+
+        message
     }
 }
 

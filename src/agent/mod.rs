@@ -1,7 +1,8 @@
 use crate::tooling::tool_calling::{RegistryToolExecutor, ToolCallRegistry, ToolExecutor};
 use crate::tooling::types::ToolContext;
 use crate::{build_context, build_tools, ensure_dirs, post_json};
-use serde_json::{Value, json};
+use crate::message::message::{IndexedValue, Message, next_request_id};
+use serde_json::{json, Value};
 use std::fs::File;
 use std::io::Write;
 use std::io::{BufRead, BufReader};
@@ -40,7 +41,7 @@ pub struct Agent {
 
 enum StepOutcome {
     Final(String),
-    ToolResults(Vec<Value>),
+    ToolResults(Vec<Message>),
 }
 
 impl Agent {
@@ -90,16 +91,24 @@ Workspace: {}"#,
         )
     }
 
-    fn load_session(&self, session_id: &str) -> Vec<Value> {
+    fn load_session(&self, session_id: &str) -> Vec<Message> {
         let session_file = self.ctx.sessions_dir.join(format!("{session_id}.jsonl"));
 
         if session_file.exists() {
             if let Ok(file) = File::open(&session_file) {
                 let reader = BufReader::new(file);
-                let messages: Vec<Value> = reader
+                let messages: Vec<Message> = reader
                     .lines()
-                    .filter_map(Result::ok)
-                    .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                    .enumerate()
+                    .filter_map(|(index, line)| {
+                        line.ok().and_then(|line| {
+                            serde_json::from_str::<Value>(&line)
+                                .ok()
+                                .and_then(|value| {
+                                    Message::try_from(IndexedValue { index, value }).ok()
+                                })
+                        })
+                    })
                     .collect();
 
                 if !messages.is_empty() {
@@ -108,13 +117,10 @@ Workspace: {}"#,
             }
         }
 
-        vec![json!({
-            "role": "system",
-            "content": self.system_prompt()
-        })]
+        vec![Message::system(self.system_prompt())]
     }
 
-    fn save_messages(&self, session_id: &str, messages: &[Value]) -> Result<(), String> {
+    fn save_messages(&self, session_id: &str, messages: &[Message]) -> Result<(), String> {
         let session_file = self.ctx.sessions_dir.join(format!("{session_id}.jsonl"));
         let start = messages.len().saturating_sub(10);
 
@@ -122,7 +128,7 @@ Workspace: {}"#,
             .map_err(|e| format!("Failed to open session file for writing: {e}"))?;
 
         for msg in &messages[start..] {
-            let line = serde_json::to_string(msg)
+            let line = serde_json::to_string(&Value::from(msg.clone()))
                 .map_err(|e| format!("Failed to serialize message: {e}"))?;
             writeln!(file, "{line}").map_err(|e| format!("Failed to write session file: {e}"))?;
         }
@@ -130,10 +136,10 @@ Workspace: {}"#,
         Ok(())
     }
 
-    fn call_llm(&self, messages: &[Value]) -> Result<Value, String> {
+    fn call_llm(&self, messages: &[Message]) -> Result<Value, String> {
         let payload = json!({
             "model": self.definition.model,
-            "messages": messages,
+            "messages": messages.iter().map(Value::from).collect::<Vec<_>>(),
             "stream": false,
             "tools": self.tool_registry.tools_payload(),
         });
@@ -152,9 +158,10 @@ Workspace: {}"#,
         Some((tool_name, args))
     }
 
-    fn step(&self, messages: &mut Vec<Value>) -> Result<StepOutcome, String> {
+    fn step(&self, messages: &mut Vec<Message>) -> Result<StepOutcome, String> {
         let assistant_message = self.call_llm(messages)?;
-        messages.push(assistant_message.clone());
+        let prev_message_id = messages.last().map(|message| message.message_id.clone());
+        messages.push(Message::out(assistant_message.clone(), prev_message_id));
 
         let tool_calls = assistant_message
             .get("tool_calls")
@@ -172,17 +179,24 @@ Workspace: {}"#,
                     .and_then(Value::as_str)
                     .unwrap_or("");
 
+                let tool_call_id = tc.get("id").and_then(Value::as_str);
+
                 let args = tc
                     .get("function")
                     .and_then(|f| f.get("arguments"))
                     .cloned()
                     .unwrap_or(Value::Null);
 
-                tool_results.push(self.tool_executor.build_tool_message(
-                    &self.tool_registry,
-                    tool_name,
-                    &args,
-                    &self.ctx,
+                let prev_message_id = messages.last().map(|message| message.message_id.clone());
+                tool_results.push(Message::out(
+                    self.tool_executor.build_tool_message(
+                        &self.tool_registry,
+                        tool_name,
+                        &args,
+                        &self.ctx,
+                        tool_call_id,
+                    ),
+                    prev_message_id,
                 ));
             }
 
@@ -190,14 +204,17 @@ Workspace: {}"#,
         }
 
         if let Some((tool_name, args)) = self.parse_content_tool_call(&assistant_message) {
-            return Ok(StepOutcome::ToolResults(vec![
+            let prev_message_id = messages.last().map(|message| message.message_id.clone());
+            return Ok(StepOutcome::ToolResults(vec![Message::out(
                 self.tool_executor.build_tool_message(
                     &self.tool_registry,
                     &tool_name,
                     &args,
                     &self.ctx,
+                    None,
                 ),
-            ]));
+                prev_message_id,
+            )]));
         }
 
         let content = assistant_message
@@ -211,11 +228,14 @@ Workspace: {}"#,
 
     pub(crate) fn run(&self, session_id: &str, user_message: &str) -> String {
         let mut messages = self.load_session(session_id);
+        let request_id = next_request_id();
+        let prev_message_id = messages.last().map(|message| message.message_id.clone());
 
-        messages.push(json!({
-            "role": "user",
-            "content": user_message
-        }));
+        messages.push(Message::user(
+            user_message.to_string(),
+            request_id,
+            prev_message_id,
+        ));
 
         for _ in 0..self.definition.max_iterations {
             match self.step(&mut messages) {

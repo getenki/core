@@ -2,6 +2,7 @@
 mod macros;
 pub mod tooling;
 pub mod agent;
+pub mod message;
 
 use crate::tooling::builtin_tools::{ExecTool, ReadFileTool, WriteFileTool};
 use crate::tooling::types::*;
