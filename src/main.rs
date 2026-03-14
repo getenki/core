@@ -3,11 +3,11 @@ mod macros;
 pub mod tooling;
 pub mod agent;
 pub mod message;
+pub mod runtime;
 
 use crate::tooling::builtin_tools::{ExecTool, ReadFileTool, WriteFileTool};
 use crate::tooling::types::*;
-
-use crate::agent::Agent;
+use crate::runtime::{CliChannel, RuntimeBuilder};
 use reqwest::Client;
 use serde_json::Value;
 use std::env;
@@ -72,24 +72,24 @@ async fn post_json(url: &str, payload: &Value, timeout_secs: u64) -> Result<Valu
 
 #[tokio::main]
 async fn main() {
-    let agent = match Agent::new().await {
-        Ok(agent) => agent,
+    let runtime = match RuntimeBuilder::for_default_agent().build().await {
+        Ok(runtime) => runtime,
         Err(e) => {
             eprintln!("{e}");
             std::process::exit(1);
         }
     };
 
-    let args: Vec<String> = env::args().collect();
+    let mut channel = match CliChannel::from_args(env::args().collect()) {
+        Ok(channel) => channel,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
 
-    if args.len() < 3 {
-        eprintln!("Usage: {} <session_id> '<message>'", args[0]);
+    if let Err(e) = runtime.serve_channel(&mut channel).await {
+        eprintln!("{e}");
         std::process::exit(1);
     }
-
-    let session_id = &args[1];
-    let message = args[2..].join(" ");
-
-    let response = agent.run(session_id, &message).await;
-    println!("{response}");
 }
