@@ -1,0 +1,35 @@
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+pub type ToolRegistry = BTreeMap<String, Box<dyn Tool>>;
+
+pub struct ToolContext {
+    pub workspace_dir: PathBuf,
+    pub sessions_dir: PathBuf,
+}
+
+pub trait Tool {
+    fn name(&self) -> &'static str;
+    fn description(&self) -> &'static str;
+    fn parameters(&self) -> Value;
+    fn execute(&self, args: &Value, ctx: &ToolContext) -> String;
+
+    fn as_tool_payload(&self) -> Value {
+        json!({
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": self.parameters(),
+            }
+        })
+    }
+
+    fn as_catalog_entry(&self) -> Value {
+        json!({
+            "description": self.description(),
+            "parameters": self.parameters(),
+        })
+    }
+}

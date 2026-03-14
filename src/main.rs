@@ -1,7 +1,11 @@
 #[macro_use]
 mod macros;
+pub mod tooling;
 
-use serde_json::{json, Map, Value};
+use crate::tooling::types::*;
+
+use reqwest::blocking::Client;
+use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, File};
@@ -9,44 +13,11 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
-use reqwest::blocking::Client;
 
 // Config
 const LLM_URL: &str = "http://localhost:11434/api/chat";
 const MODEL: &str = "qwen3.5:latest";
 const MAX_ITERATIONS: usize = 20;
-
-type ToolRegistry = BTreeMap<String, Box<dyn Tool>>;
-
-struct ToolContext {
-    workspace_dir: PathBuf,
-    sessions_dir: PathBuf,
-}
-
-trait Tool {
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
-    fn parameters(&self) -> Value;
-    fn execute(&self, args: &Value, ctx: &ToolContext) -> String;
-
-    fn as_tool_payload(&self) -> Value {
-        json!({
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": self.parameters(),
-            }
-        })
-    }
-
-    fn as_catalog_entry(&self) -> Value {
-        json!({
-            "description": self.description(),
-            "parameters": self.parameters(),
-        })
-    }
-}
 
 define_tool!(
     ReadFileTool,
@@ -288,7 +259,12 @@ fn execute_tool(tool_call: &Value, tools: &ToolRegistry, ctx: &ToolContext) -> S
     }
 }
 
-fn agent_loop(session_id: &str, user_message: &str, tools: &ToolRegistry, ctx: &ToolContext) -> String {
+fn agent_loop(
+    session_id: &str,
+    user_message: &str,
+    tools: &ToolRegistry,
+    ctx: &ToolContext,
+) -> String {
     let prompt = system_prompt(tools, ctx);
     let mut messages = load_session(session_id, &prompt, ctx);
 

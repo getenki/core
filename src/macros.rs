@@ -1,3 +1,4 @@
+use crate::tooling::types::*;
 macro_rules! define_tool {
     (
         $tool_type:ident,
