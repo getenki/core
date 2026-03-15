@@ -75,7 +75,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "core-next"
+name = "core"
 version = "0.1.0"
 dependencies = [
  "async-trait",

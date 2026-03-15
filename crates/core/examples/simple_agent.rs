@@ -27,7 +27,7 @@ async fn main() {
     let workspace_home = env::var("ENKI_WORKSPACE")
         .ok()
         .map(PathBuf::from)
-        .or_else(|| Some(PathBuf::from("examples/.agent-workspace")));
+        .or_else(|| Some(PathBuf::from("crates/core/examples/.agent-workspace")));
     let session_id = env::var("ENKI_SESSION").unwrap_or_else(|_| "demo-session".to_string());
 
     let definition = AgentDefinition {
