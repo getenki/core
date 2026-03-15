@@ -46,6 +46,11 @@ impl AgentWorkspace {
         self.tasks_dir.join(slugify(session_id))
     }
 
+    pub fn session_file(&self, session_id: &str) -> PathBuf {
+        self.sessions_dir
+            .join(format!("{}.json", slugify(session_id)))
+    }
+
     pub fn tool_context(&self, session_id: &str) -> ToolContext {
         ToolContext {
             agent_dir: self.agent_dir.clone(),

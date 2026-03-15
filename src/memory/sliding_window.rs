@@ -33,7 +33,8 @@ impl SlidingWindowMemory {
     }
 
     fn session_file(&self, session_id: &str) -> PathBuf {
-        self.provider_dir().join(format!("{}.jsonl", slugify(session_id)))
+        self.provider_dir()
+            .join(format!("{}.jsonl", slugify(session_id)))
     }
 
     async fn load_messages(&self, path: &Path) -> Result<Vec<StoredMessage>, String> {

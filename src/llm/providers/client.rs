@@ -5,9 +5,9 @@ use crate::llm::providers::types::{
     ChatMessage, LlmConfig, LlmProvider, LlmResponse, MessageRole, ResponseStream, ToolDefinition,
 };
 use async_trait::async_trait;
+use llm::LLMProvider as BackendProvider;
 use llm::builder::LLMBuilder;
 use llm::chat::ChatMessage as LlmChatMessage;
-use llm::LLMProvider as BackendProvider;
 use std::sync::Arc;
 use tracing::debug;
 
@@ -130,7 +130,10 @@ impl UniversalLLMClient {
                 MessageRole::Tool => {
                     let content = match &msg.tool_call_id {
                         Some(tool_call_id) => {
-                            format!("Tool result (tool_call_id={}): {}", tool_call_id, msg.content)
+                            format!(
+                                "Tool result (tool_call_id={}): {}",
+                                tool_call_id, msg.content
+                            )
                         }
                         None => format!("Tool result: {}", msg.content),
                     };

@@ -14,7 +14,8 @@ impl DefaultMemoryRouter {
     }
 
     fn pick(&self, names: &[&str]) -> Vec<String> {
-        names.iter()
+        names
+            .iter()
             .filter(|name| self.has_provider(name))
             .map(|name| (*name).to_string())
             .collect()

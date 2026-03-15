@@ -82,13 +82,14 @@ impl SummaryMemory {
         if let Some(llm) = &self.llm {
             let pending_text = pending
                 .iter()
-                .map(|exchange| format!("User: {}\nAssistant: {}", exchange.user, exchange.assistant))
+                .map(|exchange| {
+                    format!("User: {}\nAssistant: {}", exchange.user, exchange.assistant)
+                })
                 .collect::<Vec<_>>()
                 .join("\n\n");
             let prompt = format!(
                 "Update the running summary with the new exchanges.\nCurrent summary:\n{}\n\nNew exchanges:\n{}\n\nReturn a concise summary only.",
-                previous_summary,
-                pending_text
+                previous_summary, pending_text
             );
             let response = llm
                 .complete(
@@ -109,7 +110,10 @@ impl SummaryMemory {
             fragments.push(previous_summary.trim().to_string());
         }
         for exchange in pending {
-            fragments.push(format!("User asked: {} Assistant replied: {}", exchange.user, exchange.assistant));
+            fragments.push(format!(
+                "User asked: {} Assistant replied: {}",
+                exchange.user, exchange.assistant
+            ));
         }
 
         let summary = fragments.join(" ");
@@ -178,7 +182,9 @@ impl MemoryProvider for SummaryMemory {
             return Ok(());
         }
 
-        state.summary = self.generate_summary(&state.summary, &state.pending).await?;
+        state.summary = self
+            .generate_summary(&state.summary, &state.pending)
+            .await?;
         state.pending.clear();
         state.updated_at_ns = current_timestamp_nanos();
         self.save_state(session_id, &state).await

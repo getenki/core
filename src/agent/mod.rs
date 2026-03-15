@@ -1,14 +1,14 @@
 mod workspace;
 
 use crate::agent::workspace::AgentWorkspace;
+use crate::build_tools;
 use crate::llm::{
     ChatMessage, LlmConfig, LlmProvider, MessageRole, ToolDefinition, UniversalLLMClient,
 };
 use crate::memory::MemoryManager;
-use crate::message::message::{Message, next_request_id};
+use crate::message::message::{IndexedValue, Message, next_request_id};
 use crate::tooling::tool_calling::{RegistryToolExecutor, ToolCallRegistry, ToolExecutor};
 use crate::tooling::types::ToolContext;
-use crate::build_tools;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -126,7 +126,8 @@ impl Agent {
 
         Ok(Self {
             llm,
-            memory: memory.unwrap_or_else(|| MemoryManager::with_defaults(workspace.memory_dir.clone())),
+            memory: memory
+                .unwrap_or_else(|| MemoryManager::with_defaults(workspace.memory_dir.clone())),
             definition,
             tool_registry: ToolCallRegistry::new(build_tools()),
             tool_executor,
@@ -200,7 +201,8 @@ Current task workspace: {}"#,
             .catalog_json()
             .as_object()
             .map(|tools| {
-                tools.iter()
+                tools
+                    .iter()
                     .map(|(name, entry)| ToolDefinition {
                         name: name.clone(),
                         description: entry
@@ -321,8 +323,57 @@ Current task workspace: {}"#,
         candidates
     }
 
+    async fn load_messages(&self, session_id: &str) -> Result<Vec<Message>, String> {
+        let path = self.workspace.session_file(session_id);
+        if !tokio::fs::try_exists(&path)
+            .await
+            .map_err(|e| format!("Failed to check session state: {e}"))?
+        {
+            return Ok(Vec::new());
+        }
+
+        let raw = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| format!("Failed to read session state: {e}"))?;
+        let values: Vec<Value> = serde_json::from_str(&raw)
+            .map_err(|e| format!("Failed to parse session state: {e}"))?;
+
+        values
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| Message::try_from(IndexedValue { index, value }))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "Failed to decode session messages.".to_string())
+    }
+
+    async fn save_messages(&self, session_id: &str, messages: &[Message]) -> Result<(), String> {
+        let path = self.workspace.session_file(session_id);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("Failed to create session directory: {e}"))?;
+        }
+
+        let values = messages
+            .iter()
+            .cloned()
+            .map(Value::from)
+            .collect::<Vec<_>>();
+        let raw = serde_json::to_string_pretty(&values)
+            .map_err(|e| format!("Failed to serialize session state: {e}"))?;
+
+        tokio::fs::write(path, raw)
+            .await
+            .map_err(|e| format!("Failed to write session state: {e}"))
+    }
+
     async fn persist(&self, session_id: &str) {
         let _ = self.memory.flush_all(session_id).await;
+    }
+
+    async fn persist_state(&self, session_id: &str, messages: &[Message]) {
+        let _ = self.save_messages(session_id, messages).await;
+        self.persist(session_id).await;
     }
 
     fn push_out_message(messages: &mut Vec<Message>, value: Value) {
@@ -430,12 +481,20 @@ Current task workspace: {}"#,
             return format!("Workspace error: {e}");
         }
 
-        let memory_context = self
-            .memory
-            .build_context(session_id, user_message)
-            .await
-            .unwrap_or_default();
-        let mut messages = vec![Message::system(self.system_prompt(&ctx, &memory_context))];
+        let mut messages = match self.load_messages(session_id).await {
+            Ok(messages) => messages,
+            Err(e) => return format!("Session state error: {e}"),
+        };
+
+        if messages.is_empty() {
+            let memory_context = self
+                .memory
+                .build_context(session_id, user_message)
+                .await
+                .unwrap_or_default();
+            messages.push(Message::system(self.system_prompt(&ctx, &memory_context)));
+        }
+
         let request_id = next_request_id();
         let prev_message_id = messages.last().map(|message| message.message_id.clone());
 
@@ -448,21 +507,56 @@ Current task workspace: {}"#,
 
         for _ in 0..self.definition.max_iterations {
             match self.step(&mut messages, &ctx).await {
-                Ok(StepOutcome::Continue) => {}
+                Ok(StepOutcome::Continue) => {
+                    self.persist_state(session_id, &messages).await;
+                }
                 Ok(StepOutcome::Final(content)) => {
-                    let _ = self.memory.record_all(session_id, user_message, &content).await;
+                    let _ = self
+                        .memory
+                        .record_all(session_id, user_message, &content)
+                        .await;
                     let _ = self.memory.consolidate_all(session_id).await;
-                    self.persist(session_id).await;
+                    self.persist_state(session_id, &messages).await;
                     return content;
                 }
-                Err(e) => return format!("LLM error: {e}"),
+                Err(e) => {
+                    let content = format!("LLM error: {e}");
+                    Self::push_out_message(
+                        &mut messages,
+                        serde_json::json!({
+                            "role": "assistant",
+                            "content": content,
+                        }),
+                    );
+                    self.persist_state(session_id, &messages).await;
+                    return messages
+                        .last()
+                        .and_then(|message| {
+                            let value = Value::from(message);
+                            value
+                                .get("content")
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                        })
+                        .unwrap_or_else(|| "LLM error".to_string());
+                }
             }
         }
 
         let content = "Max iterations reached.".to_string();
-        let _ = self.memory.record_all(session_id, user_message, &content).await;
+        Self::push_out_message(
+            &mut messages,
+            serde_json::json!({
+                "role": "assistant",
+                "content": content.clone(),
+            }),
+        );
+        let _ = self
+            .memory
+            .record_all(session_id, user_message, &content)
+            .await;
         let _ = self.memory.consolidate_all(session_id).await;
-        self.persist(session_id).await;
+        self.persist_state(session_id, &messages).await;
         content
     }
 }
@@ -470,7 +564,90 @@ Current task workspace: {}"#,
 #[cfg(test)]
 mod tests {
     use super::Agent;
+    use crate::agent::AgentDefinition;
+    use crate::llm::{
+        ChatMessage, LlmConfig, LlmError, LlmProvider, LlmResponse, Result as LlmResult,
+        ToolDefinition,
+    };
+    use async_trait::async_trait;
+    use futures::stream;
     use serde_json::json;
+    use std::collections::VecDeque;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[derive(Clone)]
+    struct RecordingLlm {
+        responses: Arc<Mutex<VecDeque<LlmResponse>>>,
+        calls: Arc<Mutex<Vec<Vec<ChatMessage>>>>,
+    }
+
+    impl RecordingLlm {
+        fn new(responses: Vec<LlmResponse>) -> Self {
+            Self {
+                responses: Arc::new(Mutex::new(responses.into())),
+                calls: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn calls(&self) -> Vec<Vec<ChatMessage>> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for RecordingLlm {
+        async fn complete(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &LlmConfig,
+        ) -> LlmResult<LlmResponse> {
+            Err(LlmError::Provider("not used".to_string()))
+        }
+
+        async fn complete_stream(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &LlmConfig,
+        ) -> LlmResult<crate::llm::ResponseStream> {
+            Ok(Box::pin(stream::empty()))
+        }
+
+        async fn complete_with_tools(
+            &self,
+            messages: &[ChatMessage],
+            _tools: &[ToolDefinition],
+            _config: &LlmConfig,
+        ) -> LlmResult<LlmResponse> {
+            self.calls.lock().unwrap().push(messages.to_vec());
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or_else(|| LlmError::Provider("missing response".to_string()))
+        }
+
+        fn name(&self) -> &'static str {
+            "recording"
+        }
+
+        fn available_models(&self) -> Vec<&'static str> {
+            vec!["recording"]
+        }
+    }
+
+    fn temp_home(label: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "core-next-agent-tests-{label}-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
 
     #[test]
     fn extracts_tool_call_from_mixed_content() {
@@ -479,9 +656,8 @@ mod tests {
             "content": "I'll save the note for you.\n\n{\"tool\":\"write_file\",\"args\":{\"path\":\"note.md\",\"content\":\"hello\"}}\n\nDone."
         });
 
-        let tool_call = Agent::extract_embedded_tool_call(
-            assistant_message["content"].as_str().unwrap(),
-        );
+        let tool_call =
+            Agent::extract_embedded_tool_call(assistant_message["content"].as_str().unwrap());
 
         assert_eq!(
             tool_call,
@@ -509,6 +685,81 @@ mod tests {
                     "cmd": "pwd"
                 })
             ))
+        );
+    }
+
+    #[tokio::test]
+    async fn reloads_previous_session_messages_before_next_request() {
+        let home = temp_home("resume");
+        let llm = RecordingLlm::new(vec![
+            LlmResponse {
+                content: "First answer".to_string(),
+                usage: None,
+                tool_calls: Vec::new(),
+                model: "recording".to_string(),
+                finish_reason: Some("stop".to_string()),
+            },
+            LlmResponse {
+                content: "Second answer".to_string(),
+                usage: None,
+                tool_calls: Vec::new(),
+                model: "recording".to_string(),
+                finish_reason: Some("stop".to_string()),
+            },
+        ]);
+
+        let agent = Agent::with_definition_executor_llm_and_workspace(
+            AgentDefinition::default(),
+            Box::new(crate::tooling::tool_calling::RegistryToolExecutor),
+            Some(Box::new(llm.clone())),
+            None,
+            Some(home.clone()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(agent.run("session-a", "hello").await, "First answer");
+        assert_eq!(agent.run("session-a", "follow up").await, "Second answer");
+
+        let calls = llm.calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].len(), 4);
+        assert_eq!(calls[1][1].content, "hello");
+        assert_eq!(calls[1][2].content, "First answer");
+        assert_eq!(calls[1][3].content, "follow up");
+    }
+
+    #[tokio::test]
+    async fn persists_terminal_error_to_session_transcript() {
+        let home = temp_home("error");
+        let llm = RecordingLlm::new(Vec::new());
+
+        let agent = Agent::with_definition_executor_llm_and_workspace(
+            AgentDefinition::default(),
+            Box::new(crate::tooling::tool_calling::RegistryToolExecutor),
+            Some(Box::new(llm)),
+            None,
+            Some(home.clone()),
+        )
+        .await
+        .unwrap();
+
+        let result = agent.run("session-a", "hello").await;
+        assert_eq!(result, "LLM error: Provider error: missing response");
+
+        let session_file = home
+            .join(".atomiagent")
+            .join("agents")
+            .join("personal-assistant")
+            .join("sessions")
+            .join("session-a.json");
+        let raw = std::fs::read_to_string(session_file).unwrap();
+        let transcript: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+
+        let last = transcript.last().unwrap();
+        assert_eq!(
+            last["payload"]["content"].as_str().unwrap(),
+            "LLM error: Provider error: missing response"
         );
     }
 }

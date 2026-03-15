@@ -48,7 +48,10 @@ impl StructuredMemory {
             .join(format!("{}.json", slugify(session_id)))
     }
 
-    async fn load_store(&self, session_id: &str) -> Result<HashMap<String, StructuredItem>, String> {
+    async fn load_store(
+        &self,
+        session_id: &str,
+    ) -> Result<HashMap<String, StructuredItem>, String> {
         let path = self.session_file(session_id);
         if !fs::try_exists(&path).await.map_err(|e| e.to_string())? {
             return Ok(HashMap::new());
@@ -85,9 +88,11 @@ impl StructuredMemory {
         let timestamp_ns = current_timestamp_nanos();
         let mut items = Vec::new();
 
-        if let Some(value) =
-            capture_after_prefix(normalized, &lower, &["my name is ", "i am ", "i'm ", "call me "])
-        {
+        if let Some(value) = capture_after_prefix(
+            normalized,
+            &lower,
+            &["my name is ", "i am ", "i'm ", "call me "],
+        ) {
             items.push(StructuredItem {
                 key: "name".to_string(),
                 content: value,
@@ -202,7 +207,11 @@ fn capture_after_prefix(source: &str, lower: &str, prefixes: &[&str]) -> Option<
 }
 
 fn first_token(value: &str) -> String {
-    value.split_whitespace().next().unwrap_or("value").to_string()
+    value
+        .split_whitespace()
+        .next()
+        .unwrap_or("value")
+        .to_string()
 }
 
 fn slugify(value: &str) -> String {

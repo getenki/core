@@ -33,7 +33,10 @@ fn router_selects_window_for_followup() {
 
     let strategy = router.select("ok do it");
 
-    assert_eq!(strategy.active_providers, vec!["sliding_window".to_string()]);
+    assert_eq!(
+        strategy.active_providers,
+        vec!["sliding_window".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -43,7 +46,11 @@ async fn sliding_window_respects_size() {
 
     for index in 0..20 {
         provider
-            .record("session-a", &format!("user {index}"), &format!("assistant {index}"))
+            .record(
+                "session-a",
+                &format!("user {index}"),
+                &format!("assistant {index}"),
+            )
             .await
             .unwrap();
     }
@@ -75,7 +82,10 @@ async fn structured_keyword_recall() {
         .await
         .unwrap();
 
-    let entries = provider.recall("session-a", "what's my name", 5).await.unwrap();
+    let entries = provider
+        .recall("session-a", "what's my name", 5)
+        .await
+        .unwrap();
 
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].kind, MemoryKind::Entity);
@@ -110,7 +120,10 @@ async fn manager_routes_and_merges() {
         vec![Box::new(provider_a), Box::new(provider_b)],
     );
 
-    let context = manager.build_context("session-a", "what's my name?").await.unwrap();
+    let context = manager
+        .build_context("session-a", "what's my name?")
+        .await
+        .unwrap();
 
     assert!(context.contains("[entity] Taylor"));
     assert!(context.contains("[summary] Working on memory routing."));

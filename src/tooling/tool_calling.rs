@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use crate::tooling::types::{Tool, ToolContext, ToolRegistry};
+use async_trait::async_trait;
 use serde_json::{Value, json};
 
 pub struct ToolCallRegistry {
@@ -26,7 +26,10 @@ impl ToolCallRegistry {
     }
 
     pub fn tools_payload(&self) -> Vec<Value> {
-        self.tools.values().map(|tool| tool.as_tool_payload()).collect()
+        self.tools
+            .values()
+            .map(|tool| tool.as_tool_payload())
+            .collect()
     }
 }
 

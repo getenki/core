@@ -28,7 +28,10 @@ impl MemoryManager {
             .iter()
             .map(|provider| provider.name().to_string())
             .collect();
-        Self::new(Box::new(DefaultMemoryRouter::new(provider_names)), providers)
+        Self::new(
+            Box::new(DefaultMemoryRouter::new(provider_names)),
+            providers,
+        )
     }
 
     pub async fn build_context(
@@ -43,11 +46,15 @@ impl MemoryManager {
 
         let providers = self.providers.lock().await;
         let mut entries = Vec::new();
-        let provider_budget =
-            strategy.max_context_entries.max(1).div_ceil(strategy.active_providers.len().max(1));
+        let provider_budget = strategy
+            .max_context_entries
+            .max(1)
+            .div_ceil(strategy.active_providers.len().max(1));
 
         for provider_name in &strategy.active_providers {
-            let Some(provider) = providers.iter().find(|provider| provider.name() == provider_name)
+            let Some(provider) = providers
+                .iter()
+                .find(|provider| provider.name() == provider_name)
             else {
                 continue;
             };

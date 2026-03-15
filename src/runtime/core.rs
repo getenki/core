@@ -1,4 +1,6 @@
-use crate::runtime::{InputChannel, RuntimeHandler, RuntimeRequest, RuntimeResponse, SessionContext};
+use crate::runtime::{
+    InputChannel, RuntimeHandler, RuntimeRequest, RuntimeResponse, SessionContext,
+};
 use std::collections::HashMap;
 use std::sync::{
     Arc,
