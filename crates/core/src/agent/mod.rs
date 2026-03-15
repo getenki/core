@@ -8,7 +8,7 @@ use crate::llm::{
 use crate::memory::MemoryManager;
 use crate::message::message::{IndexedValue, Message, next_request_id};
 use crate::tooling::tool_calling::{RegistryToolExecutor, ToolCallRegistry, ToolExecutor};
-use crate::tooling::types::ToolContext;
+use crate::tooling::types::{ToolContext, ToolRegistry};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -68,8 +68,9 @@ impl Agent {
     }
 
     pub async fn with_definition(definition: AgentDefinition) -> Result<Self, String> {
-        Self::with_definition_executor_llm_and_workspace(
+        Self::with_definition_tool_registry_executor_llm_and_workspace(
             definition,
+            default_tool_registry(),
             Box::new(RegistryToolExecutor),
             None,
             None,
@@ -82,8 +83,9 @@ impl Agent {
         definition: AgentDefinition,
         tool_executor: Box<dyn ToolExecutor>,
     ) -> Result<Self, String> {
-        Self::with_definition_executor_llm_and_workspace(
+        Self::with_definition_tool_registry_executor_llm_and_workspace(
             definition,
+            default_tool_registry(),
             tool_executor,
             None,
             None,
@@ -97,8 +99,26 @@ impl Agent {
         tool_executor: Box<dyn ToolExecutor>,
         workspace_home: Option<PathBuf>,
     ) -> Result<Self, String> {
-        Self::with_definition_executor_llm_and_workspace(
+        Self::with_definition_tool_registry_executor_llm_and_workspace(
             definition,
+            default_tool_registry(),
+            tool_executor,
+            None,
+            None,
+            workspace_home,
+        )
+        .await
+    }
+
+    pub async fn with_definition_tool_registry_executor_and_workspace(
+        definition: AgentDefinition,
+        tool_registry: ToolRegistry,
+        tool_executor: Box<dyn ToolExecutor>,
+        workspace_home: Option<PathBuf>,
+    ) -> Result<Self, String> {
+        Self::with_definition_tool_registry_executor_llm_and_workspace(
+            definition,
+            tool_registry,
             tool_executor,
             None,
             None,
@@ -109,6 +129,25 @@ impl Agent {
 
     pub async fn with_definition_executor_llm_and_workspace(
         definition: AgentDefinition,
+        tool_executor: Box<dyn ToolExecutor>,
+        llm: Option<Box<dyn LlmProvider>>,
+        memory: Option<MemoryManager>,
+        workspace_home: Option<PathBuf>,
+    ) -> Result<Self, String> {
+        Self::with_definition_tool_registry_executor_llm_and_workspace(
+            definition,
+            default_tool_registry(),
+            tool_executor,
+            llm,
+            memory,
+            workspace_home,
+        )
+        .await
+    }
+
+    pub async fn with_definition_tool_registry_executor_llm_and_workspace(
+        definition: AgentDefinition,
+        tool_registry: ToolRegistry,
         tool_executor: Box<dyn ToolExecutor>,
         llm: Option<Box<dyn LlmProvider>>,
         memory: Option<MemoryManager>,
@@ -129,7 +168,7 @@ impl Agent {
             memory: memory
                 .unwrap_or_else(|| MemoryManager::with_defaults(workspace.memory_dir.clone())),
             definition,
-            tool_registry: ToolCallRegistry::new(default_tool_registry()),
+            tool_registry: ToolCallRegistry::new(tool_registry),
             tool_executor,
             workspace,
         })

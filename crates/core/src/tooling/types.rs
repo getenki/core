@@ -13,8 +13,8 @@ pub struct ToolContext {
 
 #[async_trait(?Send)]
 pub trait Tool {
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
     fn parameters(&self) -> Value;
     async fn execute(&self, args: &Value, ctx: &ToolContext) -> String;
 

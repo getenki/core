@@ -429,7 +429,38 @@ class _UniffiConverterRustBuffer:
     def lower(cls, value):
         with _UniffiRustBuffer.alloc_with_builder() as builder:
             cls.write(value, builder)
-            return builder.finalize()
+            return builder.finalize()# Magic number for the Rust proxy to call using the same mechanism as every other method,
+# to free the callback once it's dropped by Rust.
+_UNIFFI_IDX_CALLBACK_FREE = 0
+# Return codes for callback calls
+_UNIFFI_CALLBACK_SUCCESS = 0
+_UNIFFI_CALLBACK_ERROR = 1
+_UNIFFI_CALLBACK_UNEXPECTED_ERROR = 2
+
+class _UniffiCallbackInterfaceFfiConverter:
+    _handle_map = _UniffiHandleMap()
+
+    @classmethod
+    def lift(cls, handle):
+        return cls._handle_map.get(handle)
+
+    @classmethod
+    def read(cls, buf):
+        handle = buf.read_u64()
+        cls.lift(handle)
+
+    @classmethod
+    def check_lower(cls, cb):
+        pass
+
+    @classmethod
+    def lower(cls, cb):
+        handle = cls._handle_map.insert(cb)
+        return handle
+
+    @classmethod
+    def write(cls, cb, buf):
+        buf.write_u64(cls.lower(cb))
 
 # Contains loading, initialization code, and the FFI Function declarations.
 # Define some ctypes FFI types that we use in the library
@@ -480,6 +511,8 @@ def _uniffi_check_contract_api_version(lib):
 
 def _uniffi_check_api_checksums(lib):
     if lib.uniffi_enki_py_checksum_constructor_enkiagent_new() != 48417:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_enki_py_checksum_constructor_enkiagent_with_tools() != 44785:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_enki_py_checksum_method_enkiagent_run() != 59297:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -756,6 +789,23 @@ _UniffiLib.uniffi_enki_py_fn_free_enkiagent.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_enki_py_fn_free_enkiagent.restype = None
+_UNIFFI_CALLBACK_INTERFACE_ENKI_ENKI_TOOL_HANDLER_METHOD0 = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiRustBuffer,_UniffiRustBuffer,_UniffiRustBuffer,_UniffiRustBuffer,_UniffiRustBuffer,ctypes.POINTER(_UniffiRustBuffer),
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UNIFFI_CALLBACK_INTERFACE_CLONE_ENKI_ENKI_TOOL_HANDLER = ctypes.CFUNCTYPE(ctypes.c_uint64,ctypes.c_uint64,
+)
+_UNIFFI_CALLBACK_INTERFACE_FREE_ENKI_ENKI_TOOL_HANDLER = ctypes.CFUNCTYPE(None,ctypes.c_uint64,
+)
+class _UniffiVTableCallbackInterfaceEnkiEnkiToolHandler(ctypes.Structure):
+    _fields_ = [
+        ("uniffi_free", _UNIFFI_CALLBACK_INTERFACE_FREE_ENKI_ENKI_TOOL_HANDLER),
+        ("uniffi_clone", _UNIFFI_CALLBACK_INTERFACE_CLONE_ENKI_ENKI_TOOL_HANDLER),
+        ("execute", _UNIFFI_CALLBACK_INTERFACE_ENKI_ENKI_TOOL_HANDLER_METHOD0),
+    ]
+_UniffiLib.uniffi_enki_py_fn_init_callback_vtable_enkitoolhandler.argtypes = (
+    ctypes.POINTER(_UniffiVTableCallbackInterfaceEnkiEnkiToolHandler),
+)
+_UniffiLib.uniffi_enki_py_fn_init_callback_vtable_enkitoolhandler.restype = None
 _UniffiLib.uniffi_enki_py_fn_constructor_enkiagent_new.argtypes = (
     _UniffiRustBuffer,
     _UniffiRustBuffer,
@@ -765,6 +815,18 @@ _UniffiLib.uniffi_enki_py_fn_constructor_enkiagent_new.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_enki_py_fn_constructor_enkiagent_new.restype = ctypes.c_uint64
+_UniffiLib.uniffi_enki_py_fn_constructor_enkiagent_with_tools.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.c_uint32,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    ctypes.c_int8,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_enki_py_fn_constructor_enkiagent_with_tools.restype = ctypes.c_uint64
 _UniffiLib.uniffi_enki_py_fn_method_enkiagent_run.argtypes = (
     ctypes.c_uint64,
     _UniffiRustBuffer,
@@ -777,6 +839,9 @@ _UniffiLib.ffi_enki_py_uniffi_contract_version.restype = ctypes.c_uint32
 _UniffiLib.uniffi_enki_py_checksum_constructor_enkiagent_new.argtypes = (
 )
 _UniffiLib.uniffi_enki_py_checksum_constructor_enkiagent_new.restype = ctypes.c_uint16
+_UniffiLib.uniffi_enki_py_checksum_constructor_enkiagent_with_tools.argtypes = (
+)
+_UniffiLib.uniffi_enki_py_checksum_constructor_enkiagent_with_tools.restype = ctypes.c_uint16
 _UniffiLib.uniffi_enki_py_checksum_method_enkiagent_run.argtypes = (
 )
 _UniffiLib.uniffi_enki_py_checksum_method_enkiagent_run.restype = ctypes.c_uint16
@@ -883,6 +948,48 @@ class _UniffiFfiConverterString:
             builder.write(value.encode("utf-8"))
             return builder.finalize()
 
+@dataclass
+class EnkiToolSpec:
+    def __init__(self, *, name:str, description:str, parameters_json:str):
+        self.name = name
+        self.description = description
+        self.parameters_json = parameters_json
+        
+        
+
+    
+    def __str__(self):
+        return "EnkiToolSpec(name={}, description={}, parameters_json={})".format(self.name, self.description, self.parameters_json)
+    def __eq__(self, other):
+        if self.name != other.name:
+            return False
+        if self.description != other.description:
+            return False
+        if self.parameters_json != other.parameters_json:
+            return False
+        return True
+
+class _UniffiFfiConverterTypeEnkiToolSpec(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return EnkiToolSpec(
+            name=_UniffiFfiConverterString.read(buf),
+            description=_UniffiFfiConverterString.read(buf),
+            parameters_json=_UniffiFfiConverterString.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiFfiConverterString.check_lower(value.name)
+        _UniffiFfiConverterString.check_lower(value.description)
+        _UniffiFfiConverterString.check_lower(value.parameters_json)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiFfiConverterString.write(value.name, buf)
+        _UniffiFfiConverterString.write(value.description, buf)
+        _UniffiFfiConverterString.write(value.parameters_json, buf)
+
 
 class EnkiAgentProtocol(typing.Protocol):
     
@@ -918,6 +1025,42 @@ class EnkiAgent(EnkiAgentProtocol):
             *_uniffi_lowered_args,
         )
         self._handle = _uniffi_ffi_result
+    @classmethod
+    def with_tools(cls, name: str,system_prompt_preamble: str,model: str,max_iterations: int,workspace_home: typing.Optional[str],tools: typing.List[EnkiToolSpec],handler: EnkiToolHandler,include_builtin_tools: bool) -> EnkiAgent:
+        
+        _UniffiFfiConverterString.check_lower(name)
+
+        _UniffiFfiConverterString.check_lower(system_prompt_preamble)
+
+        _UniffiFfiConverterString.check_lower(model)
+
+        _UniffiFfiConverterUInt32.check_lower(max_iterations)
+
+        _UniffiFfiConverterOptionalString.check_lower(workspace_home)
+
+        _UniffiFfiConverterSequenceTypeEnkiToolSpec.check_lower(tools)
+
+        _UniffiFfiConverterTypeEnkiToolHandler.check_lower(handler)
+
+        _UniffiFfiConverterBoolean.check_lower(include_builtin_tools)
+        _uniffi_lowered_args = (
+            _UniffiFfiConverterString.lower(name),
+            _UniffiFfiConverterString.lower(system_prompt_preamble),
+            _UniffiFfiConverterString.lower(model),
+            _UniffiFfiConverterUInt32.lower(max_iterations),
+            _UniffiFfiConverterOptionalString.lower(workspace_home),
+            _UniffiFfiConverterSequenceTypeEnkiToolSpec.lower(tools),
+            _UniffiFfiConverterTypeEnkiToolHandler.lower(handler),
+            _UniffiFfiConverterBoolean.lower(include_builtin_tools),
+        )
+        _uniffi_lift_return = _UniffiFfiConverterTypeEnkiAgent.lift
+        _uniffi_error_converter = None
+        _uniffi_ffi_result = _uniffi_rust_call_with_error(
+            _uniffi_error_converter,
+            _UniffiLib.uniffi_enki_py_fn_constructor_enkiagent_with_tools,
+            *_uniffi_lowered_args,
+        )
+        return cls._uniffi_make_instance(_uniffi_ffi_result)
 
     def __del__(self):
         # In case of partial initialization of instances.
@@ -986,6 +1129,62 @@ class _UniffiFfiConverterTypeEnkiAgent:
     def write(cls, value: EnkiAgent, buf: _UniffiRustBuffer):
         buf.write_u64(cls.lower(value))
 
+
+
+
+class EnkiToolHandler(typing.Protocol):
+    
+    def execute(self, tool_name: str,args_json: str,agent_dir: str,workspace_dir: str,sessions_dir: str) -> str:
+        raise NotImplementedError
+# Put all the bits inside a class to keep the top-level namespace clean
+class _UniffiTraitImplEnkiToolHandlerImpl:
+    # For each method, generate a callback function to pass to Rust
+
+    @_UNIFFI_CALLBACK_INTERFACE_ENKI_ENKI_TOOL_HANDLER_METHOD0
+    def execute(
+            uniffi_handle,
+            tool_name,
+            args_json,
+            agent_dir,
+            workspace_dir,
+            sessions_dir,
+            uniffi_out_return,
+            uniffi_call_status_ptr,
+        ):
+        uniffi_obj = _UniffiFfiConverterTypeEnkiToolHandler._handle_map.get(uniffi_handle)
+        def make_call():
+            uniffi_args = (_UniffiFfiConverterString.lift(tool_name), _UniffiFfiConverterString.lift(args_json), _UniffiFfiConverterString.lift(agent_dir), _UniffiFfiConverterString.lift(workspace_dir), _UniffiFfiConverterString.lift(sessions_dir), )
+            uniffi_method = uniffi_obj.execute
+            return uniffi_method(*uniffi_args)
+        def write_return_value(v):
+            uniffi_out_return[0] = _UniffiFfiConverterString.lower(v)
+        _uniffi_trait_interface_call(
+                uniffi_call_status_ptr.contents,
+                make_call,
+                write_return_value,
+        )
+
+    @_UNIFFI_CALLBACK_INTERFACE_FREE_ENKI_ENKI_TOOL_HANDLER
+    def _uniffi_free(uniffi_handle):
+        _UniffiFfiConverterTypeEnkiToolHandler._handle_map.remove(uniffi_handle)
+
+    @_UNIFFI_CALLBACK_INTERFACE_CLONE_ENKI_ENKI_TOOL_HANDLER
+    def _uniffi_clone(uniffi_handle):
+        return _UniffiFfiConverterTypeEnkiToolHandler._handle_map.clone(uniffi_handle)
+
+    # Generate the FFI VTable.  This has a field for each callback interface method.
+    _uniffi_vtable = _UniffiVTableCallbackInterfaceEnkiEnkiToolHandler(
+        _uniffi_free,
+        _uniffi_clone,
+        execute,
+    )
+    # Send Rust a pointer to the VTable.  Note: this means we need to keep the struct alive forever,
+    # or else bad things will happen when Rust tries to access it.
+    _UniffiLib.uniffi_enki_py_fn_init_callback_vtable_enkitoolhandler(ctypes.byref(_uniffi_vtable))
+
+# The _UniffiConverter which transforms the Callbacks in to Handles to pass to Rust.
+_UniffiFfiConverterTypeEnkiToolHandler = _UniffiCallbackInterfaceFfiConverter()
+
 class _UniffiFfiConverterUInt32(_UniffiConverterPrimitiveInt):
     CLASS_NAME = "u32"
     VALUE_MIN = 0
@@ -1024,8 +1223,54 @@ class _UniffiFfiConverterOptionalString(_UniffiConverterRustBuffer):
         else:
             raise InternalError("Unexpected flag byte for optional type")
 
+class _UniffiFfiConverterSequenceTypeEnkiToolSpec(_UniffiConverterRustBuffer):
+    @classmethod
+    def check_lower(cls, value):
+        for item in value:
+            _UniffiFfiConverterTypeEnkiToolSpec.check_lower(item)
+
+    @classmethod
+    def write(cls, value, buf):
+        items = len(value)
+        buf.write_i32(items)
+        for item in value:
+            _UniffiFfiConverterTypeEnkiToolSpec.write(item, buf)
+
+    @classmethod
+    def read(cls, buf):
+        count = buf.read_i32()
+        if count < 0:
+            raise InternalError("Unexpected negative sequence length")
+
+        return [
+            _UniffiFfiConverterTypeEnkiToolSpec.read(buf) for i in range(count)
+        ]
+
+class _UniffiFfiConverterBoolean:
+    @classmethod
+    def check_lower(cls, value):
+        return not not value
+
+    @classmethod
+    def lower(cls, value):
+        return 1 if value else 0
+
+    @staticmethod
+    def lift(value):
+        return value != 0
+
+    @classmethod
+    def read(cls, buf):
+        return cls.lift(buf.read_u8())
+
+    @classmethod
+    def write(cls, value, buf):
+        buf.write_u8(value)
+
 __all__ = [
     "InternalError",
+    "EnkiToolSpec",
     "EnkiAgent",
     "EnkiAgentProtocol",
+    "EnkiToolHandler",
 ]

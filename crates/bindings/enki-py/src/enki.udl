@@ -1,9 +1,31 @@
 namespace enki {
 };
 
+dictionary EnkiToolSpec {
+  string name;
+  string description;
+  string parameters_json;
+};
+
+callback interface EnkiToolHandler {
+  string execute(string tool_name, string args_json, string agent_dir, string workspace_dir, string sessions_dir);
+};
+
 interface EnkiAgent {
   [Name=new]
   constructor(string name, string system_prompt_preamble, string model, u32 max_iterations, string? workspace_home);
+
+  [Name=with_tools]
+  constructor(
+    string name,
+    string system_prompt_preamble,
+    string model,
+    u32 max_iterations,
+    string? workspace_home,
+    sequence<EnkiToolSpec> tools,
+    EnkiToolHandler handler,
+    boolean include_builtin_tools
+  );
 
   [Async]
   string run(string session_id, string user_message);

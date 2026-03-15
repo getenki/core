@@ -8,11 +8,11 @@ macro_rules! define_tool {
     ) => {
         #[async_trait::async_trait(?Send)]
         impl Tool for $tool_type {
-            fn name(&self) -> &'static str {
+            fn name(&self) -> &str {
                 $name
             }
 
-            fn description(&self) -> &'static str {
+            fn description(&self) -> &str {
                 $description
             }
 
