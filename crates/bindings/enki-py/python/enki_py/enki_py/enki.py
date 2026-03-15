@@ -510,9 +510,9 @@ def _uniffi_check_contract_api_version(lib):
         raise InternalError("UniFFI contract version mismatch: try cleaning and rebuilding your project")
 
 def _uniffi_check_api_checksums(lib):
-    if lib.uniffi_enki_py_checksum_constructor_enkiagent_new() != 176:
+    if lib.uniffi_enki_py_checksum_constructor_enkiagent_new() != 48417:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_enki_py_checksum_constructor_enkiagent_with_tools() != 44785:
+    if lib.uniffi_enki_py_checksum_constructor_enkiagent_with_tools() != 1398:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_enki_py_checksum_method_enkiagent_run() != 59297:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -812,7 +812,6 @@ _UniffiLib.uniffi_enki_py_fn_constructor_enkiagent_new.argtypes = (
     _UniffiRustBuffer,
     ctypes.c_uint32,
     _UniffiRustBuffer,
-    ctypes.c_int8,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_enki_py_fn_constructor_enkiagent_new.restype = ctypes.c_uint64
@@ -824,7 +823,6 @@ _UniffiLib.uniffi_enki_py_fn_constructor_enkiagent_with_tools.argtypes = (
     _UniffiRustBuffer,
     _UniffiRustBuffer,
     ctypes.c_uint64,
-    ctypes.c_int8,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_enki_py_fn_constructor_enkiagent_with_tools.restype = ctypes.c_uint64
@@ -1000,7 +998,7 @@ class EnkiAgentProtocol(typing.Protocol):
 class EnkiAgent(EnkiAgentProtocol):
     
     _handle: ctypes.c_uint64
-    def __init__(self, name: str,system_prompt_preamble: str,model: str,max_iterations: int,workspace_home: typing.Optional[str],include_builtin_tools: bool):
+    def __init__(self, name: str,system_prompt_preamble: str,model: str,max_iterations: int,workspace_home: typing.Optional[str]):
         
         _UniffiFfiConverterString.check_lower(name)
 
@@ -1011,15 +1009,12 @@ class EnkiAgent(EnkiAgentProtocol):
         _UniffiFfiConverterUInt32.check_lower(max_iterations)
 
         _UniffiFfiConverterOptionalString.check_lower(workspace_home)
-
-        _UniffiFfiConverterBoolean.check_lower(include_builtin_tools)
         _uniffi_lowered_args = (
             _UniffiFfiConverterString.lower(name),
             _UniffiFfiConverterString.lower(system_prompt_preamble),
             _UniffiFfiConverterString.lower(model),
             _UniffiFfiConverterUInt32.lower(max_iterations),
             _UniffiFfiConverterOptionalString.lower(workspace_home),
-            _UniffiFfiConverterBoolean.lower(include_builtin_tools),
         )
         _uniffi_lift_return = _UniffiFfiConverterTypeEnkiAgent.lift
         _uniffi_error_converter = None
@@ -1030,7 +1025,7 @@ class EnkiAgent(EnkiAgentProtocol):
         )
         self._handle = _uniffi_ffi_result
     @classmethod
-    def with_tools(cls, name: str,system_prompt_preamble: str,model: str,max_iterations: int,workspace_home: typing.Optional[str],tools: typing.List[EnkiToolSpec],handler: EnkiToolHandler,include_builtin_tools: bool) -> EnkiAgent:
+    def with_tools(cls, name: str,system_prompt_preamble: str,model: str,max_iterations: int,workspace_home: typing.Optional[str],tools: typing.List[EnkiToolSpec],handler: EnkiToolHandler) -> EnkiAgent:
         
         _UniffiFfiConverterString.check_lower(name)
 
@@ -1045,8 +1040,6 @@ class EnkiAgent(EnkiAgentProtocol):
         _UniffiFfiConverterSequenceTypeEnkiToolSpec.check_lower(tools)
 
         _UniffiFfiConverterTypeEnkiToolHandler.check_lower(handler)
-
-        _UniffiFfiConverterBoolean.check_lower(include_builtin_tools)
         _uniffi_lowered_args = (
             _UniffiFfiConverterString.lower(name),
             _UniffiFfiConverterString.lower(system_prompt_preamble),
@@ -1055,7 +1048,6 @@ class EnkiAgent(EnkiAgentProtocol):
             _UniffiFfiConverterOptionalString.lower(workspace_home),
             _UniffiFfiConverterSequenceTypeEnkiToolSpec.lower(tools),
             _UniffiFfiConverterTypeEnkiToolHandler.lower(handler),
-            _UniffiFfiConverterBoolean.lower(include_builtin_tools),
         )
         _uniffi_lift_return = _UniffiFfiConverterTypeEnkiAgent.lift
         _uniffi_error_converter = None
@@ -1226,27 +1218,6 @@ class _UniffiFfiConverterOptionalString(_UniffiConverterRustBuffer):
             return _UniffiFfiConverterString.read(buf)
         else:
             raise InternalError("Unexpected flag byte for optional type")
-
-class _UniffiFfiConverterBoolean:
-    @classmethod
-    def check_lower(cls, value):
-        return not not value
-
-    @classmethod
-    def lower(cls, value):
-        return 1 if value else 0
-
-    @staticmethod
-    def lift(value):
-        return value != 0
-
-    @classmethod
-    def read(cls, buf):
-        return cls.lift(buf.read_u8())
-
-    @classmethod
-    def write(cls, value, buf):
-        buf.write_u8(value)
 
 class _UniffiFfiConverterSequenceTypeEnkiToolSpec(_UniffiConverterRustBuffer):
     @classmethod

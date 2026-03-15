@@ -1,4 +1,3 @@
-use core_next::default_tool_registry;
 use core_next::llm::UniversalLLMClient;
 use core_next::runtime::{CliChannel, RuntimeBuilder};
 use std::env;
@@ -6,7 +5,6 @@ use std::env;
 #[tokio::main]
 async fn main() {
     let runtime = match RuntimeBuilder::for_default_agent()
-        .with_tool_registry(default_tool_registry())
         .with_llm(Box::new(match UniversalLLMClient::new("ollama::qwen3.5") {
             Ok(llm) => llm,
             Err(e) => {

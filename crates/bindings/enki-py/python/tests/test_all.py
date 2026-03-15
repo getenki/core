@@ -121,7 +121,6 @@ async def main() -> tuple[str, DemoToolHandler]:
         workspace_home=str(WORKSPACE_HOME),
         tools=build_tools(),
         handler=handler,
-        include_builtin_tools=True,
     )
     res = await agent.run(
         "session-custom-tools",
@@ -137,10 +136,58 @@ async def main() -> tuple[str, DemoToolHandler]:
     return res, handler
 
 
+def exercise_custom_tools(handler: DemoToolHandler) -> None:
+    project_status = json.loads(
+        handler.execute("project_status", "{}", "agent", "workspace", "sessions")
+    )
+    assert project_status == {
+        "agent_dir": "agent",
+        "workspace_dir": "workspace",
+        "sessions_dir": "sessions",
+        "status": "ready",
+    }
+
+    assert (
+        handler.execute(
+            "sum_numbers",
+            json.dumps({"values": [7, 8, 9]}),
+            "",
+            "",
+            "",
+        )
+        == "24"
+    )
+    assert (
+        handler.execute(
+            "make_slug",
+            json.dumps({"text": "Enki Python Tools"}),
+            "",
+            "",
+            "",
+        )
+        == "enki-python-tools"
+    )
+    assert (
+        handler.execute(
+            "echo_note",
+            json.dumps(
+                {
+                    "title": "Tool Summary",
+                    "body": "custom tools are wired",
+                }
+            ),
+            "",
+            "",
+            "",
+        )
+        == "# Tool Summary\n\ncustom tools are wired"
+    )
+
+
 def test_create_agent_with_custom_tools():
     result, handler = asyncio.run(main())
     assert isinstance(result, str)
-    assert handler.calls
+    exercise_custom_tools(handler)
 
 
 if __name__ == "__main__":

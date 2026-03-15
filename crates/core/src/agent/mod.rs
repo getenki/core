@@ -1,6 +1,7 @@
 mod workspace;
 
 use crate::agent::workspace::AgentWorkspace;
+use crate::tooling::builtin_tools;
 use crate::llm::{
     ChatMessage, LlmConfig, LlmProvider, MessageRole, ToolDefinition, UniversalLLMClient,
 };
@@ -53,6 +54,12 @@ struct ToolInvocation {
 }
 
 impl Agent {
+    fn with_builtin_tools(mut tool_registry: ToolRegistry) -> ToolRegistry {
+        let mut builtin_registry = builtin_tools::default_registry();
+        builtin_registry.append(&mut tool_registry);
+        builtin_registry
+    }
+
     fn resolve_model(definition: &AgentDefinition) -> Result<String, String> {
         if !definition.model.trim().is_empty() {
             return Ok(definition.model.clone());
@@ -169,6 +176,7 @@ impl Agent {
     ) -> Result<Self, String> {
         let workspace = AgentWorkspace::new(&definition.name, workspace_home);
         workspace.ensure_dirs().await?;
+        let tool_registry = Self::with_builtin_tools(tool_registry);
         let llm = match llm {
             Some(llm) => llm,
             None => {
@@ -520,7 +528,12 @@ Current task workspace: {}
                     args: tool_call
                         .get("function")
                         .and_then(|function| function.get("arguments"))
-                        .cloned()
+                        .map(|arguments| match arguments {
+                            Value::String(raw) => {
+                                serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.clone()))
+                            }
+                            _ => arguments.clone(),
+                        })
                         .unwrap_or(Value::Null),
                     call_id: tool_call
                         .get("id")
@@ -684,11 +697,11 @@ Current task workspace: {}
 mod tests {
     use super::Agent;
     use crate::agent::AgentDefinition;
-    use crate::default_tool_registry;
     use crate::llm::{
         ChatMessage, LlmConfig, LlmError, LlmProvider, LlmResponse, Result as LlmResult,
         ToolDefinition,
     };
+    use crate::tooling::types::ToolRegistryBuilder;
     use async_trait::async_trait;
     use futures::stream;
     use serde_json::json;
@@ -930,36 +943,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn does_not_expose_builtin_tools_by_default() {
-        let home = temp_home("no-builtin-tools");
-        let llm = RecordingLlm::new(vec![LlmResponse {
-            content: "No tools".to_string(),
-            usage: None,
-            tool_calls: Vec::new(),
-            model: "recording".to_string(),
-            finish_reason: Some("stop".to_string()),
-        }]);
-
-        let agent = Agent::with_definition_executor_llm_and_workspace(
-            AgentDefinition::default(),
-            Box::new(crate::tooling::tool_calling::RegistryToolExecutor),
-            Some(Box::new(llm.clone())),
-            None,
-            Some(home),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(agent.run("session-a", "hello").await, "No tools");
-
-        let requested_tools = llm.requested_tools();
-        assert_eq!(requested_tools.len(), 1);
-        assert!(requested_tools[0].is_empty());
-    }
-
-    #[tokio::test]
-    async fn exposes_builtin_tools_only_when_added_during_creation() {
-        let home = temp_home("builtin-tools");
+    async fn exposes_builtin_tools_by_default() {
+        let home = temp_home("builtin-tools-default");
         let llm = RecordingLlm::new(vec![LlmResponse {
             content: "Builtin tools enabled".to_string(),
             usage: None,
@@ -968,9 +953,8 @@ mod tests {
             finish_reason: Some("stop".to_string()),
         }]);
 
-        let agent = Agent::with_definition_tool_registry_executor_llm_and_workspace(
+        let agent = Agent::with_definition_executor_llm_and_workspace(
             AgentDefinition::default(),
-            default_tool_registry(),
             Box::new(crate::tooling::tool_calling::RegistryToolExecutor),
             Some(Box::new(llm.clone())),
             None,
@@ -991,5 +975,127 @@ mod tests {
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>();
         assert_eq!(tool_names, vec!["exec", "read_file", "write_file"]);
+    }
+
+    #[tokio::test]
+    async fn custom_tool_registry_is_merged_with_builtin_tools() {
+        let home = temp_home("builtin-tools-merge");
+        let llm = RecordingLlm::new(vec![LlmResponse {
+            content: "Merged tools enabled".to_string(),
+            usage: None,
+            tool_calls: Vec::new(),
+            model: "recording".to_string(),
+            finish_reason: Some("stop".to_string()),
+        }]);
+
+        fn echo_tool(_ctx: &crate::tooling::types::ToolContext, value: String) -> String {
+            format!("echo:{value}")
+        }
+
+        let tool_registry = ToolRegistryBuilder::new()
+            .register_fn(
+                "echo",
+                "Echo a value",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "value": { "type": "string" }
+                    },
+                    "required": ["value"]
+                }),
+                ["value"],
+                echo_tool,
+            )
+            .build();
+
+        let agent = Agent::with_definition_tool_registry_executor_llm_and_workspace(
+            AgentDefinition::default(),
+            tool_registry,
+            Box::new(crate::tooling::tool_calling::RegistryToolExecutor),
+            Some(Box::new(llm.clone())),
+            None,
+            Some(home),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            agent.run("session-a", "hello").await,
+            "Merged tools enabled"
+        );
+
+        let requested_tools = llm.requested_tools();
+        assert_eq!(requested_tools.len(), 1);
+        let tool_names = requested_tools[0]
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(tool_names, vec!["echo", "exec", "read_file", "write_file"]);
+    }
+
+    #[tokio::test]
+    async fn executes_function_tools_from_native_stringified_arguments() {
+        fn echo_tool(_ctx: &crate::tooling::types::ToolContext, value: String) -> String {
+            format!("echo:{value}")
+        }
+
+        let home = temp_home("function-tool");
+        let llm = RecordingLlm::new(vec![
+            LlmResponse {
+                content: String::new(),
+                usage: None,
+                tool_calls: vec![json!({
+                    "id": "call-1",
+                    "function": {
+                        "name": "echo",
+                        "arguments": "{\"value\":\"hello\"}"
+                    }
+                })
+                .to_string()],
+                model: "recording".to_string(),
+                finish_reason: Some("tool_calls".to_string()),
+            },
+            LlmResponse {
+                content: "done".to_string(),
+                usage: None,
+                tool_calls: Vec::new(),
+                model: "recording".to_string(),
+                finish_reason: Some("stop".to_string()),
+            },
+        ]);
+
+        let tool_registry = ToolRegistryBuilder::new()
+            .register_fn(
+                "echo",
+                "Echo a value",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "value": { "type": "string" }
+                    },
+                    "required": ["value"]
+                }),
+                ["value"],
+                echo_tool,
+            )
+            .build();
+
+        let agent = Agent::with_definition_tool_registry_executor_llm_and_workspace(
+            AgentDefinition::default(),
+            tool_registry,
+            Box::new(crate::tooling::tool_calling::RegistryToolExecutor),
+            Some(Box::new(llm.clone())),
+            None,
+            Some(home),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(agent.run("session-a", "hello").await, "done");
+
+        let calls = llm.calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1][3].content, "echo:hello");
+        assert_eq!(calls[1][3].tool_call_id.as_deref(), Some("call-1"));
     }
 }

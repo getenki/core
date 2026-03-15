@@ -106,3 +106,5 @@ def test_wrapper_builds_tool_schemas_and_passes_runtime_deps(monkeypatch):
         assert handler.execute("get_player_name", "{}", "", "", "") == "Anne"
     finally:
         handler.clear_deps()
+
+    assert "include_builtin_tools" not in FakeEnkiAgent.last_kwargs

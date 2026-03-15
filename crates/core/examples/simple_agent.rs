@@ -1,5 +1,4 @@
 use core_next::agent::{Agent, AgentDefinition};
-use core_next::default_tool_registry;
 use std::env;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -38,10 +37,8 @@ async fn main() {
         max_iterations: 12,
     };
 
-    // Add builtin tools explicitly at creation time instead of relying on defaults.
-    let agent = match Agent::with_definition_tool_registry_executor_and_workspace(
+    let agent = match Agent::with_definition_executor_and_workspace(
         definition,
-        default_tool_registry(),
         Box::new(core_next::tooling::tool_calling::RegistryToolExecutor),
         workspace_home,
     )

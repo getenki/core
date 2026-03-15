@@ -1,3 +1,4 @@
+#[allow(unused_macros)]
 macro_rules! define_tool {
     (
         $tool_type:ty,
@@ -25,6 +26,7 @@ macro_rules! define_tool {
     };
 }
 
+#[allow(unused_macros)]
 macro_rules! register_tools {
     ($($tool_type:ident),+ $(,)?) => {{
         let mut registry: crate::tooling::types::ToolRegistry = std::collections::BTreeMap::new();

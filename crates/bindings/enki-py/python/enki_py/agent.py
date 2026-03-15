@@ -203,7 +203,6 @@ class Agent(Generic[DepsT]):
         name: str = "Agent",
         max_iterations: int = 20,
         workspace_home: str | None = None,
-        include_builtin_tools: bool = False,
     ) -> None:
         self.model = model
         self.deps_type = deps_type
@@ -211,7 +210,6 @@ class Agent(Generic[DepsT]):
         self.name = name
         self.max_iterations = max_iterations
         self.workspace_home = workspace_home
-        self.include_builtin_tools = include_builtin_tools
         self._tools: dict[str, _RegisteredTool] = {}
         self._handler = _PythonToolHandler(self._tools)
         self._backend: Any = None
@@ -261,7 +259,6 @@ class Agent(Generic[DepsT]):
             workspace_home=self.workspace_home,
             tools=self._tool_specs(),
             handler=self._handler,
-            include_builtin_tools=self.include_builtin_tools,
         )
         self._dirty = False
         return self._backend

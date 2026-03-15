@@ -33,6 +33,13 @@ impl ToolCallRegistry {
     }
 }
 
+fn normalize_tool_args(args: &Value) -> Value {
+    match args {
+        Value::String(raw) => serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.clone())),
+        _ => args.clone(),
+    }
+}
+
 #[async_trait(?Send)]
 pub trait ToolExecutor {
     async fn execute(
@@ -78,7 +85,7 @@ impl ToolExecutor for RegistryToolExecutor {
         ctx: &ToolContext,
     ) -> String {
         match registry.get(tool_name) {
-            Some(tool) => tool.execute(args, ctx).await,
+            Some(tool) => tool.execute(&normalize_tool_args(args), ctx).await,
             None => format!("Unknown tool: {tool_name}"),
         }
     }

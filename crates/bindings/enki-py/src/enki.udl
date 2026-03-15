@@ -18,8 +18,7 @@ interface EnkiAgent {
     string system_prompt_preamble,
     string model,
     u32 max_iterations,
-    string? workspace_home,
-    boolean include_builtin_tools
+    string? workspace_home
   );
 
   [Name=with_tools]
@@ -30,8 +29,7 @@ interface EnkiAgent {
     u32 max_iterations,
     string? workspace_home,
     sequence<EnkiToolSpec> tools,
-    EnkiToolHandler handler,
-    boolean include_builtin_tools
+    EnkiToolHandler handler
   );
 
   [Async]
