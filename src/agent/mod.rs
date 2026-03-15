@@ -151,7 +151,8 @@ impl Agent {
 - When done, respond with plain text.
 Available tools: {}
 Agent workspace: {}
-Current task workspace: {}"#,
+Current task workspace: {}
+- When using write_file or read_file, use simple relative paths (e.g. "note.md", "output/data.csv"). Paths are resolved relative to the current task workspace automatically. Do NOT construct full workspace paths manually."#,
             self.definition.name,
             self.definition.system_prompt_preamble,
             self.tool_registry.catalog_json(),
@@ -257,6 +258,18 @@ Current task workspace: {}"#,
             return Some(tool_call);
         }
 
+        // Strip markdown code fences and try the inner content
+        for block in Self::extract_fenced_code_blocks(content) {
+            if let Some(tool_call) = Self::parse_tool_call_value(block) {
+                return Some(tool_call);
+            }
+            for candidate in Self::json_object_candidates(block) {
+                if let Some(tool_call) = Self::parse_tool_call_value(candidate) {
+                    return Some(tool_call);
+                }
+            }
+        }
+
         for candidate in Self::json_object_candidates(content) {
             if let Some(tool_call) = Self::parse_tool_call_value(candidate) {
                 return Some(tool_call);
@@ -266,7 +279,51 @@ Current task workspace: {}"#,
         None
     }
 
+    fn extract_fenced_code_blocks(content: &str) -> Vec<&str> {
+        let mut blocks = Vec::new();
+        let mut remaining = content;
+
+        while let Some(fence_start) = remaining.find("```") {
+            let after_fence = &remaining[fence_start + 3..];
+            let body_start = after_fence.find('\n').map(|i| i + 1).unwrap_or(0);
+            let body = &after_fence[body_start..];
+
+            if let Some(fence_end) = body.find("```") {
+                let block = body[..fence_end].trim();
+                if !block.is_empty() {
+                    blocks.push(block);
+                }
+                remaining = &body[fence_end + 3..];
+            } else {
+                break;
+            }
+        }
+
+        blocks
+    }
+
+    /// Try to parse as a tool call, and if that fails, attempt to repair common
+    /// LLM mistakes such as missing trailing closing braces.
     fn parse_tool_call_value(raw: &str) -> Option<(String, Value)> {
+        // Try as-is first
+        if let Some(result) = Self::try_parse_tool_call(raw) {
+            return Some(result);
+        }
+
+        // Small LLMs often drop trailing `}` after very long string values.
+        // Try appending up to 3 closing braces.
+        let mut repaired = raw.to_string();
+        for _ in 0..3 {
+            repaired.push('}');
+            if let Some(result) = Self::try_parse_tool_call(&repaired) {
+                return Some(result);
+            }
+        }
+
+        None
+    }
+
+    fn try_parse_tool_call(raw: &str) -> Option<(String, Value)> {
         let parsed: Value = serde_json::from_str(raw).ok()?;
         let tool_name = parsed.get("tool")?.as_str()?.to_string();
         let args = parsed.get("args").cloned().unwrap_or(Value::Null);
@@ -317,6 +374,15 @@ Current task workspace: {}"#,
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // If we still have an unclosed candidate (LLM dropped trailing `}`),
+        // include the remainder as a candidate so parse_tool_call_value can
+        // attempt to repair it.
+        if depth > 0 {
+            if let Some(start_idx) = start {
+                candidates.push(&content[start_idx..]);
             }
         }
 
@@ -683,6 +749,45 @@ mod tests {
                 "exec".to_string(),
                 json!({
                     "cmd": "pwd"
+                })
+            ))
+        );
+    }
+
+    #[test]
+    fn repairs_tool_call_with_missing_closing_brace() {
+        // Small LLMs sometimes drop the final `}` after long content strings
+        let content = r##"I'll write the note.
+
+{"tool": "write_file", "args": {"path": "note.md", "content": "# Hello World"}"##;
+
+        let tool_call = Agent::extract_embedded_tool_call(content);
+
+        assert_eq!(
+            tool_call,
+            Some((
+                "write_file".to_string(),
+                json!({
+                    "path": "note.md",
+                    "content": "# Hello World"
+                })
+            ))
+        );
+    }
+
+    #[test]
+    fn extracts_tool_call_from_code_fence() {
+        let content = "Here is the tool call:\n\n```json\n{\"tool\": \"write_file\", \"args\": {\"path\": \"note.md\", \"content\": \"hello\"}}\n```\n\nDone.";
+
+        let tool_call = Agent::extract_embedded_tool_call(content);
+
+        assert_eq!(
+            tool_call,
+            Some((
+                "write_file".to_string(),
+                json!({
+                    "path": "note.md",
+                    "content": "hello"
                 })
             ))
         );

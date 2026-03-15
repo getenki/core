@@ -1,6 +1,5 @@
 use crate::tooling::types::*;
 use serde_json::{Value, json};
-use std::path::Path;
 use tokio::fs;
 use tokio::process::Command;
 
@@ -19,13 +18,14 @@ define_tool!(
         },
         "required": ["path"]
     }),
-    |args, _ctx| {
+    |args, ctx| {
         let path = args
             .get("path")
             .and_then(Value::as_str)
             .unwrap_or_default();
 
-        match fs::read_to_string(Path::new(path)).await {
+        let resolved = ctx.workspace_dir.join(path);
+        match fs::read_to_string(&resolved).await {
             Ok(content) => content,
             Err(_) => "File not found.".to_string(),
         }
@@ -44,7 +44,7 @@ define_tool!(
         },
         "required": ["path", "content"]
     }),
-    |args, _ctx| {
+    |args, ctx| {
         let path = args
             .get("path")
             .and_then(Value::as_str)
@@ -55,7 +55,11 @@ define_tool!(
             .and_then(Value::as_str)
             .unwrap_or_default();
 
-        match fs::write(Path::new(path), content).await {
+        let resolved = ctx.workspace_dir.join(path);
+        if let Some(parent) = resolved.parent() {
+            let _ = fs::create_dir_all(parent).await;
+        }
+        match fs::write(&resolved, content).await {
             Ok(_) => "File written.".to_string(),
             Err(e) => format!("Error: {e}"),
         }
@@ -79,8 +83,13 @@ define_tool!(
             .and_then(Value::as_str)
             .unwrap_or_default();
 
-        match Command::new("sh")
-            .arg("-c")
+        #[cfg(windows)]
+        let (shell, flag) = ("cmd", "/C");
+        #[cfg(not(windows))]
+        let (shell, flag) = ("sh", "-c");
+
+        match Command::new(shell)
+            .arg(flag)
             .arg(cmd)
             .current_dir(&ctx.workspace_dir)
             .output()
