@@ -6,11 +6,17 @@ use crate::llm::{
     ChatMessage, LlmConfig, LlmProvider, MessageRole, ToolDefinition, UniversalLLMClient,
 };
 use crate::memory::MemoryManager;
-use crate::message::message::{IndexedValue, Message, next_request_id};
+use crate::message::message::{Message, next_request_id};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::message::message::IndexedValue;
 use crate::tooling::tool_calling::{RegistryToolExecutor, ToolCallRegistry, ToolExecutor};
 use crate::tooling::types::{ToolContext, ToolRegistry};
 use serde_json::Value;
+#[cfg(target_arch = "wasm32")]
+use std::collections::HashMap;
 use std::path::PathBuf;
+#[cfg(target_arch = "wasm32")]
+use tokio::sync::Mutex;
 
 // Config
 const DEFAULT_MAX_ITERATIONS: usize = 20;
@@ -40,6 +46,8 @@ pub struct Agent {
     workspace: AgentWorkspace,
     llm: Box<dyn LlmProvider>,
     memory: MemoryManager,
+    #[cfg(target_arch = "wasm32")]
+    sessions: Mutex<HashMap<String, Vec<Message>>>,
 }
 
 enum StepOutcome {
@@ -193,6 +201,8 @@ impl Agent {
             tool_registry: ToolCallRegistry::new(tool_registry),
             tool_executor,
             workspace,
+            #[cfg(target_arch = "wasm32")]
+            sessions: Mutex::new(HashMap::new()),
         })
     }
 
@@ -451,7 +461,20 @@ Current task workspace: {}
     }
 
     async fn load_messages(&self, session_id: &str) -> Result<Vec<Message>, String> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Ok(self
+                .sessions
+                .lock()
+                .await
+                .get(session_id)
+                .cloned()
+                .unwrap_or_default());
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
         let path = self.workspace.session_file(session_id);
+        #[cfg(not(target_arch = "wasm32"))]
         if !tokio::fs::try_exists(&path)
             .await
             .map_err(|e| format!("Failed to check session state: {e}"))?
@@ -459,12 +482,15 @@ Current task workspace: {}
             return Ok(Vec::new());
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         let raw = tokio::fs::read_to_string(&path)
             .await
             .map_err(|e| format!("Failed to read session state: {e}"))?;
+        #[cfg(not(target_arch = "wasm32"))]
         let values: Vec<Value> = serde_json::from_str(&raw)
             .map_err(|e| format!("Failed to parse session state: {e}"))?;
 
+        #[cfg(not(target_arch = "wasm32"))]
         values
             .into_iter()
             .enumerate()
@@ -474,21 +500,35 @@ Current task workspace: {}
     }
 
     async fn save_messages(&self, session_id: &str, messages: &[Message]) -> Result<(), String> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.sessions
+                .lock()
+                .await
+                .insert(session_id.to_string(), messages.to_vec());
+            return Ok(());
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
         let path = self.workspace.session_file(session_id);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create session directory: {e}"))?;
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         let values = messages
             .iter()
             .cloned()
             .map(Value::from)
             .collect::<Vec<_>>();
+        #[cfg(not(target_arch = "wasm32"))]
         let raw = serde_json::to_string_pretty(&values)
             .map_err(|e| format!("Failed to serialize session state: {e}"))?;
 
+        #[cfg(not(target_arch = "wasm32"))]
         tokio::fs::write(path, raw)
             .await
             .map_err(|e| format!("Failed to write session state: {e}"))
@@ -609,6 +649,7 @@ Current task workspace: {}
 
     pub async fn run(&self, session_id: &str, user_message: &str) -> String {
         let ctx = self.workspace.tool_context(session_id);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Err(e) = tokio::fs::create_dir_all(&ctx.workspace_dir).await {
             return format!("Workspace error: {e}");
         }

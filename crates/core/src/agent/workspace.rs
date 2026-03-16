@@ -1,6 +1,8 @@
 use crate::tooling::types::ToolContext;
+#[cfg(not(target_arch = "wasm32"))]
 use std::env;
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::fs;
 
 pub struct AgentWorkspace {
@@ -30,22 +32,31 @@ impl AgentWorkspace {
     }
 
     pub async fn ensure_dirs(&self) -> Result<(), String> {
-        fs::create_dir_all(&self.memory_dir)
-            .await
-            .map_err(|e| format!("Failed to create memory workspace: {e}"))?;
-        fs::create_dir_all(&self.sessions_dir)
-            .await
-            .map_err(|e| format!("Failed to create session workspace: {e}"))?;
-        fs::create_dir_all(&self.tasks_dir)
-            .await
-            .map_err(|e| format!("Failed to create task workspace: {e}"))?;
-        Ok(())
+        #[cfg(target_arch = "wasm32")]
+        {
+            Ok(())
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            fs::create_dir_all(&self.memory_dir)
+                .await
+                .map_err(|e| format!("Failed to create memory workspace: {e}"))?;
+            fs::create_dir_all(&self.sessions_dir)
+                .await
+                .map_err(|e| format!("Failed to create session workspace: {e}"))?;
+            fs::create_dir_all(&self.tasks_dir)
+                .await
+                .map_err(|e| format!("Failed to create task workspace: {e}"))?;
+            Ok(())
+        }
     }
 
     pub fn task_dir(&self, session_id: &str) -> PathBuf {
         self.tasks_dir.join(slugify(session_id))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn session_file(&self, session_id: &str) -> PathBuf {
         self.sessions_dir
             .join(format!("{}.json", slugify(session_id)))
@@ -61,6 +72,12 @@ impl AgentWorkspace {
 }
 
 fn default_home_dir() -> PathBuf {
+    #[cfg(target_arch = "wasm32")]
+    {
+        PathBuf::new()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     env::var("HOME")
         .or_else(|_| env::var("USERPROFILE"))
         .map(PathBuf::from)
