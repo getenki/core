@@ -192,7 +192,7 @@ impl MemoryProvider for PythonMemoryProvider {
 
 #[async_trait(?Send)]
 impl MemoryRouter for PythonMemoryRouter {
-    fn select(&self, _user_message: &str) -> MemoryStrategy {
+    async fn select(&self, _user_message: &str) -> MemoryStrategy {
         MemoryStrategy {
             active_providers: self.provider_names.clone(),
             max_context_entries: 6,

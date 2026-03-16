@@ -20,9 +20,14 @@ try:
     from .enki_py import EnkiTool as _LowLevelTool
 except ImportError:  # pragma: no cover
     from .enki_py import EnkiToolSpec as _LowLevelTool
+try:
+    from .enki_py.enki import uniffi_set_event_loop as _uniffi_set_event_loop
+except ImportError:  # pragma: no cover
+    _uniffi_set_event_loop = None
 
 
 DepsT = TypeVar("DepsT")
+_CALLBACK_EVENT_LOOP: asyncio.AbstractEventLoop | None = None
 
 
 @dataclass(frozen=True)
@@ -111,7 +116,7 @@ class Tool:
 class MemoryModule:
     name: str
     record: Callable[[str, str, str], Any]
-    recall: Callable[[str, str, int], list[MemoryEntry]]
+    recall: Callable[[str, str, int], Any]
     flush: Callable[[str], Any] | None = None
     consolidate: Callable[[str], Any] | None = None
 
@@ -123,7 +128,7 @@ class MemoryBackend(ABC):
     name: str = "memory"
 
     @abstractmethod
-    def record(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
+    def record(self, session_id: str, user_msg: str, assistant_msg: str) -> Any:
         """Store a user and assistant exchange for a session."""
 
     @abstractmethod
@@ -132,14 +137,14 @@ class MemoryBackend(ABC):
         session_id: str,
         query: str,
         max_entries: int,
-    ) -> list[MemoryEntry]:
+    ) -> Any:
         """Return memory entries relevant to the current query."""
 
     @abstractmethod
-    def flush(self, session_id: str) -> None:
+    def flush(self, session_id: str) -> Any:
         """Persist or clear buffered session state."""
 
-    def consolidate(self, session_id: str) -> None:
+    def consolidate(self, session_id: str) -> Any:
         """Optional hook for summarization or compaction."""
         return None
 
@@ -211,7 +216,7 @@ class _PythonToolHandler(EnkiToolHandler):
                     f"Missing required argument '{parameter.name}' for tool '{tool_name}'"
                 )
 
-        result = tool.func(*bound_args)
+        result = _resolve_callback_result(tool.func(*bound_args))
         return _stringify_tool_result(result)
 
 
@@ -227,7 +232,7 @@ class _PythonMemoryHandler(EnkiMemoryHandler):
         assistant_msg: str,
     ) -> None:
         memory = self._memories[memory_name]
-        memory.record(session_id, user_msg, assistant_msg)
+        _resolve_callback_result(memory.record(session_id, user_msg, assistant_msg))
 
     def recall(
         self,
@@ -237,18 +242,52 @@ class _PythonMemoryHandler(EnkiMemoryHandler):
         max_entries: int,
     ) -> list[_LowLevelMemoryEntry]:
         memory = self._memories[memory_name]
-        entries = memory.recall(session_id, query, max_entries) or []
+        entries = _resolve_callback_result(memory.recall(session_id, query, max_entries))
+        entries = entries or []
         return [entry.as_low_level_entry() for entry in entries]
 
     def flush(self, memory_name: str, session_id: str) -> None:
         memory = self._memories[memory_name]
         if memory.flush is not None:
-            memory.flush(session_id)
+            _resolve_callback_result(memory.flush(session_id))
 
     def consolidate(self, memory_name: str, session_id: str) -> None:
         memory = self._memories[memory_name]
         if memory.consolidate is not None:
-            memory.consolidate(session_id)
+            _resolve_callback_result(memory.consolidate(session_id))
+
+
+def _resolve_callback_result(value: Any) -> Any:
+    if not inspect.isawaitable(value):
+        return value
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = _CALLBACK_EVENT_LOOP
+
+    if loop is not None and loop.is_running():
+        future = asyncio.run_coroutine_threadsafe(value, loop)
+        return future.result()
+
+    return asyncio.run(value)
+
+
+def _try_set_uniffi_event_loop() -> None:
+    global _CALLBACK_EVENT_LOOP
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _CALLBACK_EVENT_LOOP = loop
+    if _uniffi_set_event_loop is not None:
+        _uniffi_set_event_loop(loop)
+
+
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 def _stringify_tool_result(value: Any) -> str:
@@ -468,6 +507,7 @@ class Agent(Generic[DepsT]):
     ) -> AgentRunResult:
         backend = self._ensure_backend()
         session_id = session_id or f"session-{uuid.uuid4()}"
+        _try_set_uniffi_event_loop()
         self._handler.set_deps(deps)
         try:
             output = await backend.run(session_id, user_message)

@@ -50,5 +50,5 @@ pub trait MemoryProvider {
 
 #[async_trait(?Send)]
 pub trait MemoryRouter {
-    fn select(&self, user_message: &str) -> MemoryStrategy;
+    async fn select(&self, user_message: &str) -> MemoryStrategy;
 }
