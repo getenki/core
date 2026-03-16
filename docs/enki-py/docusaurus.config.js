@@ -64,7 +64,7 @@ const config = {
               to: "/docs/intro"
             },
             {
-              label: "Agent Wrapper",
+              label: "Getting Started Guide",
               to: "/docs/agent-wrapper"
             }
           ]

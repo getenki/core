@@ -5,7 +5,8 @@ const sidebars = {
     "agent-wrapper",
     "low-level-api",
     "examples",
-    "faq"
+    "faq",
+    "build-from-source"
   ]
 };
 

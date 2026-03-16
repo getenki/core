@@ -3,16 +3,18 @@ sidebar_position: 3
 slug: /agent-wrapper
 ---
 
-# Agent Wrapper
+# Getting Started Guide
 
-The high-level wrapper lives in `python/enki_py/agent.py` and exposes:
+Use `Agent` when you want the normal Python entry point.
+
+The wrapper exposes:
 
 - `Agent`
 - `AgentRunResult`
 - `RunContext`
 - `Tool`
 
-## Creating an agent
+## Create an agent
 
 ```python
 from enki_py import Agent
@@ -27,7 +29,7 @@ agent = Agent(
 )
 ```
 
-Constructor parameters:
+Common constructor parameters:
 
 - `model`: model identifier passed through to the backend
 - `deps_type`: optional dependency type for tools that receive context
@@ -37,7 +39,7 @@ Constructor parameters:
 - `workspace_home`: optional workspace root path
 - `tools`: optional list of prebuilt `Tool` instances
 
-## Registering tools
+## Register tools
 
 There are two decorators:
 
@@ -83,7 +85,7 @@ print(result.output)
 
 `run_sync()` uses `asyncio.run()` when no loop is active, and falls back to a background thread if a loop is already running.
 
-## Schema generation
+## Tool schemas
 
 `Tool.from_function()` inspects Python type annotations and builds a JSON schema automatically for:
 
@@ -118,7 +120,7 @@ Produces:
 }
 ```
 
-## Registering concrete tool objects
+## Register tool objects directly
 
 If you do not want decorators, create `Tool` instances directly:
 

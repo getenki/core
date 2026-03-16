@@ -5,43 +5,29 @@ slug: /installation
 
 # Installation
 
-The binding is packaged with `maturin` and points its Python sources at `python/`.
+Install `enki-py` from PyPI.
 
 ## Requirements
 
 - Python `>=3.8`
-- Rust toolchain for local builds
-- Node.js `>=18` for this Docusaurus site
+- `pip` or `uv`
 
-## Build the Python package locally
-
-From `crates/bindings/enki-py`:
+If you use `pip`:
 
 ```bash
-pip install maturin
-maturin develop
+pip install enki-py
 ```
 
-If you use the existing virtual environment in the crate, activate it first and run `maturin develop` there.
-
-## Install docs dependencies
-
-From `docs/enki-py`:
+If you use `uv`:
 
 ```bash
-npm install
+uv add enki-py
 ```
 
-## Run the docs site
+## Quick check
 
 ```bash
-npm start
+python -c "from enki_py import Agent; print(Agent)"
 ```
 
-## Build static docs
-
-```bash
-npm run build
-```
-
-This writes the static site to `docs/enki-py/build`.
+For package metadata and releases, see https://pypi.org/project/enki-py/

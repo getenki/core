@@ -5,11 +5,9 @@ slug: /examples
 
 # Examples
 
-The repository already contains a few strong examples of how `enki-py` is intended to be used.
+These examples show the main ways to use `enki-py`.
 
 ## Decorator-style tools
-
-Based on `python/tests/test_agent_wrapper.py`:
 
 ```python
 from enki_py import Agent, RunContext
@@ -33,8 +31,6 @@ print(result.output)
 ```
 
 ## Explicit low-level tools
-
-Based on `python/tests/test_all.py`:
 
 ```python
 import json
@@ -86,7 +82,7 @@ agent = enki_py.EnkiAgent.with_tools(
 
 ## File-organization review agent
 
-`python/tests/simple_file_organization_agent.py` is a larger end-to-end example showing:
+A larger end-to-end agent can combine:
 
 - a typed dependency object with a review root
 - multiple filesystem-oriented tools
