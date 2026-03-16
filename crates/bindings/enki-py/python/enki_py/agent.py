@@ -5,6 +5,7 @@ import inspect
 import json
 import threading
 import uuid
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Generic, Optional, TypeVar, Union, get_args, get_origin
@@ -116,6 +117,40 @@ class MemoryModule:
 
     def as_low_level_memory(self) -> _LowLevelMemoryModule:
         return _LowLevelMemoryModule(name=self.name)
+
+
+class MemoryBackend(ABC):
+    name: str = "memory"
+
+    @abstractmethod
+    def record(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
+        """Store a user and assistant exchange for a session."""
+
+    @abstractmethod
+    def recall(
+        self,
+        session_id: str,
+        query: str,
+        max_entries: int,
+    ) -> list[MemoryEntry]:
+        """Return memory entries relevant to the current query."""
+
+    @abstractmethod
+    def flush(self, session_id: str) -> None:
+        """Persist or clear buffered session state."""
+
+    def consolidate(self, session_id: str) -> None:
+        """Optional hook for summarization or compaction."""
+        return None
+
+    def as_memory_module(self) -> MemoryModule:
+        return MemoryModule(
+            name=self.name,
+            record=self.record,
+            recall=self.recall,
+            flush=self.flush,
+            consolidate=self.consolidate,
+        )
 
 
 class _PythonToolHandler(EnkiToolHandler):
@@ -475,6 +510,7 @@ class Agent(Generic[DepsT]):
 __all__ = [
     "Agent",
     "AgentRunResult",
+    "MemoryBackend",
     "MemoryEntry",
     "MemoryKind",
     "MemoryModule",

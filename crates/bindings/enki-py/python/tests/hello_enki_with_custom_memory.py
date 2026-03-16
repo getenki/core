@@ -1,7 +1,9 @@
-from enki_py import Agent, MemoryEntry, MemoryKind, MemoryModule
+from enki_py import Agent, MemoryBackend, MemoryEntry, MemoryKind
 
 
-class SimpleMemory:
+class ExampleMemory(MemoryBackend):
+    name = "python_memory"
+
     def __init__(self) -> None:
         self._sessions: dict[str, list[tuple[str, str]]] = {}
 
@@ -11,10 +13,10 @@ class SimpleMemory:
         exchanges.append(("assistant", assistant_msg))
 
     def recall(
-        self,
-        session_id: str,
-        query: str,
-        max_entries: int,
+            self,
+            session_id: str,
+            query: str,
+            max_entries: int,
     ) -> list[MemoryEntry]:
         exchanges = self._sessions.get(session_id, [])
         recent = exchanges[-max_entries:]
@@ -33,19 +35,12 @@ class SimpleMemory:
         self._sessions.setdefault(session_id, [])
 
 
-memory = SimpleMemory()
+memory = ExampleMemory()
 
 agent = Agent(
     "ollama::qwen3.5:latest",
     instructions="Answer clearly and keep responses short.",
-    memories=[
-        MemoryModule(
-            name="python_memory",
-            record=memory.record,
-            recall=memory.recall,
-            flush=memory.flush,
-        )
-    ],
+    memories=[memory.as_memory_module()],
 )
 
 result = agent.run_sync("Explain what this project does.")
