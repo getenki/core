@@ -5,10 +5,16 @@ import inspect
 import json
 import threading
 import uuid
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Callable, Generic, Optional, TypeVar, Union, get_args, get_origin
 
 from .enki_py import EnkiAgent as _LowLevelEnkiAgent
+from .enki_py import EnkiMemoryEntry as _LowLevelMemoryEntry
+from .enki_py import EnkiMemoryHandler
+from .enki_py import EnkiMemoryKind as _LowLevelMemoryKind
+from .enki_py import EnkiMemoryModule as _LowLevelMemoryModule
 from .enki_py import EnkiToolHandler
 try:
     from .enki_py import EnkiTool as _LowLevelTool
@@ -27,6 +33,41 @@ class RunContext(Generic[DepsT]):
 @dataclass(frozen=True)
 class AgentRunResult:
     output: str
+
+
+class MemoryKind(str, Enum):
+    RECENT_MESSAGE = "RecentMessage"
+    SUMMARY = "Summary"
+    ENTITY = "Entity"
+    PREFERENCE = "Preference"
+
+
+@dataclass(frozen=True)
+class MemoryEntry:
+    key: str
+    content: str
+    kind: MemoryKind
+    relevance: float
+    timestamp_ns: int
+
+    def as_low_level_entry(self) -> _LowLevelMemoryEntry:
+        return _LowLevelMemoryEntry(
+            key=self.key,
+            content=self.content,
+            kind=_LowLevelMemoryKind[self.kind.name],
+            relevance=self.relevance,
+            timestamp_ns=self.timestamp_ns,
+        )
+
+    @classmethod
+    def from_low_level(cls, entry: _LowLevelMemoryEntry) -> "MemoryEntry":
+        return cls(
+            key=entry.key,
+            content=entry.content,
+            kind=MemoryKind[entry.kind.name],
+            relevance=entry.relevance,
+            timestamp_ns=entry.timestamp_ns,
+        )
 
 
 @dataclass(frozen=True)
@@ -63,6 +104,52 @@ class Tool:
             name=self.name,
             description=self.description,
             parameters_json=self.parameters_json,
+        )
+
+
+@dataclass(frozen=True)
+class MemoryModule:
+    name: str
+    record: Callable[[str, str, str], Any]
+    recall: Callable[[str, str, int], list[MemoryEntry]]
+    flush: Callable[[str], Any] | None = None
+    consolidate: Callable[[str], Any] | None = None
+
+    def as_low_level_memory(self) -> _LowLevelMemoryModule:
+        return _LowLevelMemoryModule(name=self.name)
+
+
+class MemoryBackend(ABC):
+    name: str = "memory"
+
+    @abstractmethod
+    def record(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
+        """Store a user and assistant exchange for a session."""
+
+    @abstractmethod
+    def recall(
+        self,
+        session_id: str,
+        query: str,
+        max_entries: int,
+    ) -> list[MemoryEntry]:
+        """Return memory entries relevant to the current query."""
+
+    @abstractmethod
+    def flush(self, session_id: str) -> None:
+        """Persist or clear buffered session state."""
+
+    def consolidate(self, session_id: str) -> None:
+        """Optional hook for summarization or compaction."""
+        return None
+
+    def as_memory_module(self) -> MemoryModule:
+        return MemoryModule(
+            name=self.name,
+            record=self.record,
+            recall=self.recall,
+            flush=self.flush,
+            consolidate=self.consolidate,
         )
 
 
@@ -126,6 +213,42 @@ class _PythonToolHandler(EnkiToolHandler):
 
         result = tool.func(*bound_args)
         return _stringify_tool_result(result)
+
+
+class _PythonMemoryHandler(EnkiMemoryHandler):
+    def __init__(self, memories: dict[str, MemoryModule]) -> None:
+        self._memories = memories
+
+    def record(
+        self,
+        memory_name: str,
+        session_id: str,
+        user_msg: str,
+        assistant_msg: str,
+    ) -> None:
+        memory = self._memories[memory_name]
+        memory.record(session_id, user_msg, assistant_msg)
+
+    def recall(
+        self,
+        memory_name: str,
+        session_id: str,
+        query: str,
+        max_entries: int,
+    ) -> list[_LowLevelMemoryEntry]:
+        memory = self._memories[memory_name]
+        entries = memory.recall(session_id, query, max_entries) or []
+        return [entry.as_low_level_entry() for entry in entries]
+
+    def flush(self, memory_name: str, session_id: str) -> None:
+        memory = self._memories[memory_name]
+        if memory.flush is not None:
+            memory.flush(session_id)
+
+    def consolidate(self, memory_name: str, session_id: str) -> None:
+        memory = self._memories[memory_name]
+        if memory.consolidate is not None:
+            memory.consolidate(session_id)
 
 
 def _stringify_tool_result(value: Any) -> str:
@@ -237,6 +360,7 @@ class Agent(Generic[DepsT]):
         max_iterations: int = 20,
         workspace_home: str | None = None,
         tools: list[Tool] | None = None,
+        memories: list[MemoryModule] | None = None,
     ) -> None:
         self.model = model
         self.deps_type = deps_type
@@ -245,12 +369,17 @@ class Agent(Generic[DepsT]):
         self.max_iterations = max_iterations
         self.workspace_home = workspace_home
         self._tools: dict[str, Tool] = {}
+        self._memories: dict[str, MemoryModule] = {}
         self._handler = _PythonToolHandler(self._tools)
+        self._memory_handler = _PythonMemoryHandler(self._memories)
         self._backend: Any = None
         self._dirty = True
         if tools:
             for tool in tools:
                 self.register_tool(tool)
+        if memories:
+            for memory in memories:
+                self.register_memory(memory)
 
     def tool_plain(self, func: Callable[..., Any]) -> Callable[..., Any]:
         self.register_tool(Tool.from_function(func, uses_context=False))
@@ -269,22 +398,64 @@ class Agent(Generic[DepsT]):
         self._dirty = True
         return tool
 
+    def register_memory(self, memory: MemoryModule) -> MemoryModule:
+        self._memories[memory.name] = memory
+        self._dirty = True
+        return memory
+
     def _tool_specs(self) -> list[_LowLevelTool]:
         return [tool.as_low_level_tool() for tool in self._tools.values()]
+
+    def _memory_specs(self) -> list[_LowLevelMemoryModule]:
+        return [memory.as_low_level_memory() for memory in self._memories.values()]
 
     def _ensure_backend(self) -> Any:
         if self._backend is not None and not self._dirty:
             return self._backend
 
-        self._backend = _LowLevelEnkiAgent.with_tools(
-            name=self.name,
-            system_prompt_preamble=self.instructions,
-            model=self.model,
-            max_iterations=self.max_iterations,
-            workspace_home=self.workspace_home,
-            tools=self._tool_specs(),
-            handler=self._handler,
-        )
+        tool_specs = self._tool_specs()
+        memory_specs = self._memory_specs()
+
+        if tool_specs and memory_specs:
+            self._backend = _LowLevelEnkiAgent.with_tools_and_memory(
+                name=self.name,
+                system_prompt_preamble=self.instructions,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                workspace_home=self.workspace_home,
+                tools=tool_specs,
+                tool_handler=self._handler,
+                memories=memory_specs,
+                memory_handler=self._memory_handler,
+            )
+        elif tool_specs:
+            self._backend = _LowLevelEnkiAgent.with_tools(
+                name=self.name,
+                system_prompt_preamble=self.instructions,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                workspace_home=self.workspace_home,
+                tools=tool_specs,
+                handler=self._handler,
+            )
+        elif memory_specs:
+            self._backend = _LowLevelEnkiAgent.with_memory(
+                name=self.name,
+                system_prompt_preamble=self.instructions,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                workspace_home=self.workspace_home,
+                memories=memory_specs,
+                handler=self._memory_handler,
+            )
+        else:
+            self._backend = _LowLevelEnkiAgent(
+                name=self.name,
+                system_prompt_preamble=self.instructions,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                workspace_home=self.workspace_home,
+            )
         self._dirty = False
         return self._backend
 
@@ -336,4 +507,13 @@ class Agent(Generic[DepsT]):
         return result_box["result"]
 
 
-__all__ = ["Agent", "AgentRunResult", "RunContext", "Tool"]
+__all__ = [
+    "Agent",
+    "AgentRunResult",
+    "MemoryBackend",
+    "MemoryEntry",
+    "MemoryKind",
+    "MemoryModule",
+    "RunContext",
+    "Tool",
+]

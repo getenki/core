@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use core_next::agent::{Agent, AgentDefinition};
+use core_next::memory::{MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy};
 use core_next::tooling::tool_calling::RegistryToolExecutor;
 use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
 use serde_json::Value;
@@ -14,6 +15,28 @@ pub struct EnkiTool {
     pub parameters_json: String,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum EnkiMemoryKind {
+    RecentMessage,
+    Summary,
+    Entity,
+    Preference,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnkiMemoryEntry {
+    pub key: String,
+    pub content: String,
+    pub kind: EnkiMemoryKind,
+    pub relevance: f32,
+    pub timestamp_ns: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnkiMemoryModule {
+    pub name: String,
+}
+
 pub trait EnkiToolHandler: Send + Sync {
     fn execute(
         &self,
@@ -25,11 +48,42 @@ pub trait EnkiToolHandler: Send + Sync {
     ) -> String;
 }
 
+pub trait EnkiMemoryHandler: Send + Sync {
+    fn record(
+        &self,
+        memory_name: String,
+        session_id: String,
+        user_msg: String,
+        assistant_msg: String,
+    );
+
+    fn recall(
+        &self,
+        memory_name: String,
+        session_id: String,
+        query: String,
+        max_entries: u32,
+    ) -> Vec<EnkiMemoryEntry>;
+
+    fn flush(&self, memory_name: String, session_id: String);
+
+    fn consolidate(&self, memory_name: String, session_id: String);
+}
+
 struct PythonTool {
     name: String,
     description: String,
     parameters: Value,
     handler: Arc<dyn EnkiToolHandler>,
+}
+
+struct PythonMemoryProvider {
+    name: String,
+    handler: Arc<dyn EnkiMemoryHandler>,
+}
+
+struct PythonMemoryRouter {
+    provider_names: Vec<String>,
 }
 
 #[async_trait(?Send)]
@@ -83,6 +137,93 @@ fn build_tool_registry(
     Ok(registry)
 }
 
+#[async_trait(?Send)]
+impl MemoryProvider for PythonMemoryProvider {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn record(
+        &mut self,
+        session_id: &str,
+        user_msg: &str,
+        assistant_msg: &str,
+    ) -> Result<(), String> {
+        self.handler.record(
+            self.name.clone(),
+            session_id.to_string(),
+            user_msg.to_string(),
+            assistant_msg.to_string(),
+        );
+        Ok(())
+    }
+
+    async fn recall(
+        &self,
+        session_id: &str,
+        query: &str,
+        max_entries: usize,
+    ) -> Result<Vec<MemoryEntry>, String> {
+        Ok(self
+            .handler
+            .recall(
+                self.name.clone(),
+                session_id.to_string(),
+                query.to_string(),
+                max_entries.min(u32::MAX as usize) as u32,
+            )
+            .into_iter()
+            .map(MemoryEntry::from)
+            .collect())
+    }
+
+    async fn flush(&self, session_id: &str) -> Result<(), String> {
+        self.handler
+            .flush(self.name.clone(), session_id.to_string());
+        Ok(())
+    }
+
+    async fn consolidate(&mut self, session_id: &str) -> Result<(), String> {
+        self.handler
+            .consolidate(self.name.clone(), session_id.to_string());
+        Ok(())
+    }
+}
+
+#[async_trait(?Send)]
+impl MemoryRouter for PythonMemoryRouter {
+    fn select(&self, _user_message: &str) -> MemoryStrategy {
+        MemoryStrategy {
+            active_providers: self.provider_names.clone(),
+            max_context_entries: 6,
+        }
+    }
+}
+
+fn build_memory_manager(
+    memories: Vec<EnkiMemoryModule>,
+    handler: Arc<dyn EnkiMemoryHandler>,
+) -> MemoryManager {
+    let provider_names = memories
+        .iter()
+        .map(|memory| memory.name.clone())
+        .collect::<Vec<_>>();
+    let providers = memories
+        .into_iter()
+        .map(|memory| {
+            Box::new(PythonMemoryProvider {
+                name: memory.name,
+                handler: handler.clone(),
+            }) as Box<dyn MemoryProvider>
+        })
+        .collect();
+
+    MemoryManager::new(
+        Box::new(PythonMemoryRouter { provider_names }),
+        providers,
+    )
+}
+
 struct RunRequest {
     session_id: String,
     user_message: String,
@@ -133,6 +274,60 @@ impl EnkiAgent {
             workspace_home,
             tools,
             handler,
+        )
+    }
+
+    pub fn with_memory(
+        name: String,
+        system_prompt_preamble: String,
+        model: String,
+        max_iterations: u32,
+        workspace_home: Option<String>,
+        memories: Vec<EnkiMemoryModule>,
+        handler: Box<dyn EnkiMemoryHandler>,
+    ) -> Self {
+        let definition = AgentDefinition {
+            name,
+            system_prompt_preamble,
+            model,
+            max_iterations: max_iterations as usize,
+        };
+
+        Self::from_custom_tools_and_memory(
+            definition,
+            workspace_home,
+            Vec::new(),
+            None,
+            memories,
+            Some(handler),
+        )
+    }
+
+    pub fn with_tools_and_memory(
+        name: String,
+        system_prompt_preamble: String,
+        model: String,
+        max_iterations: u32,
+        workspace_home: Option<String>,
+        tools: Vec<EnkiTool>,
+        tool_handler: Box<dyn EnkiToolHandler>,
+        memories: Vec<EnkiMemoryModule>,
+        memory_handler: Box<dyn EnkiMemoryHandler>,
+    ) -> Self {
+        let definition = AgentDefinition {
+            name,
+            system_prompt_preamble,
+            model,
+            max_iterations: max_iterations as usize,
+        };
+
+        Self::from_custom_tools_and_memory(
+            definition,
+            workspace_home,
+            tools,
+            Some(tool_handler),
+            memories,
+            Some(memory_handler),
         )
     }
 
@@ -194,6 +389,24 @@ impl EnkiAgent {
         tools: Vec<EnkiTool>,
         handler: Box<dyn EnkiToolHandler>,
     ) -> Self {
+        Self::from_custom_tools_and_memory(
+            definition,
+            workspace_home,
+            tools,
+            Some(handler),
+            Vec::new(),
+            None,
+        )
+    }
+
+    fn from_custom_tools_and_memory(
+        definition: AgentDefinition,
+        workspace_home: Option<String>,
+        tools: Vec<EnkiTool>,
+        tool_handler: Option<Box<dyn EnkiToolHandler>>,
+        memories: Vec<EnkiMemoryModule>,
+        memory_handler: Option<Box<dyn EnkiMemoryHandler>>,
+    ) -> Self {
         let workspace_home = workspace_home.map(PathBuf::from);
         let (request_tx, request_rx) = mpsc::channel::<RunRequest>();
 
@@ -213,8 +426,8 @@ impl EnkiAgent {
                 }
             };
 
-            let tool_registry =
-                match build_tool_registry(tools, Arc::from(handler)) {
+            let tool_registry = match tool_handler {
+                Some(handler) => match build_tool_registry(tools, Arc::from(handler)) {
                     Ok(tool_registry) => tool_registry,
                     Err(error) => {
                         let message = format!("Initialization error: {error}");
@@ -223,13 +436,21 @@ impl EnkiAgent {
                         }
                         return;
                     }
-                };
+                },
+                None => ToolRegistry::new(),
+            };
+
+            let memory = memory_handler.map(|handler| {
+                build_memory_manager(memories, Arc::from(handler))
+            });
 
             let agent =
-                match runtime.block_on(Agent::with_definition_tool_registry_executor_and_workspace(
+                match runtime.block_on(Agent::with_definition_tool_registry_executor_llm_and_workspace(
                     definition,
                     tool_registry,
                     Box::new(RegistryToolExecutor),
+                    None,
+                    memory,
                     workspace_home,
                 )) {
                     Ok(agent) => agent,
@@ -279,6 +500,52 @@ impl EnkiAgent {
         reply_rx
             .await
             .unwrap_or_else(|_| "Worker error: agent worker dropped reply channel".to_string())
+    }
+}
+
+impl From<EnkiMemoryKind> for MemoryKind {
+    fn from(value: EnkiMemoryKind) -> Self {
+        match value {
+            EnkiMemoryKind::RecentMessage => MemoryKind::RecentMessage,
+            EnkiMemoryKind::Summary => MemoryKind::Summary,
+            EnkiMemoryKind::Entity => MemoryKind::Entity,
+            EnkiMemoryKind::Preference => MemoryKind::Preference,
+        }
+    }
+}
+
+impl From<MemoryKind> for EnkiMemoryKind {
+    fn from(value: MemoryKind) -> Self {
+        match value {
+            MemoryKind::RecentMessage => EnkiMemoryKind::RecentMessage,
+            MemoryKind::Summary => EnkiMemoryKind::Summary,
+            MemoryKind::Entity => EnkiMemoryKind::Entity,
+            MemoryKind::Preference => EnkiMemoryKind::Preference,
+        }
+    }
+}
+
+impl From<EnkiMemoryEntry> for MemoryEntry {
+    fn from(value: EnkiMemoryEntry) -> Self {
+        Self {
+            key: value.key,
+            content: value.content,
+            kind: value.kind.into(),
+            relevance: value.relevance,
+            timestamp_ns: value.timestamp_ns as u128,
+        }
+    }
+}
+
+impl From<MemoryEntry> for EnkiMemoryEntry {
+    fn from(value: MemoryEntry) -> Self {
+        Self {
+            key: value.key,
+            content: value.content,
+            kind: value.kind.into(),
+            relevance: value.relevance,
+            timestamp_ns: value.timestamp_ns.min(u64::MAX as u128) as u64,
+        }
     }
 }
 
