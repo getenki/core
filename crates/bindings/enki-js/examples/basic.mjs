@@ -52,6 +52,7 @@ const toolHandler = async ({ tool, args }) => {
 const agent = new EnkiJsAgent(
   "Example Agent",
   "Use the echo tool before answering.",
+  "js::demo",
   4,
   llmHandler,
   toolHandler,
