@@ -114,6 +114,13 @@ class Tool:
 
 @dataclass(frozen=True)
 class MemoryModule:
+    """Python memory callbacks.
+
+    Each callback may be a normal function or an ``async def`` coroutine
+    function. Async callbacks are executed on the active event loop when one
+    is available.
+    """
+
     name: str
     record: Callable[[str, str, str], Any]
     recall: Callable[[str, str, int], Any]
@@ -125,11 +132,20 @@ class MemoryModule:
 
 
 class MemoryBackend(ABC):
+    """Base class for custom Python memory backends.
+
+    Implementations may provide either synchronous methods or ``async def``
+    methods for ``record``, ``recall``, ``flush``, and ``consolidate``.
+    """
+
     name: str = "memory"
 
     @abstractmethod
     def record(self, session_id: str, user_msg: str, assistant_msg: str) -> Any:
-        """Store a user and assistant exchange for a session."""
+        """Store a user and assistant exchange for a session.
+
+        May return ``None`` directly or an awaitable resolving to ``None``.
+        """
 
     @abstractmethod
     def recall(
@@ -138,14 +154,24 @@ class MemoryBackend(ABC):
         query: str,
         max_entries: int,
     ) -> Any:
-        """Return memory entries relevant to the current query."""
+        """Return entries relevant to the current query.
+
+        May return ``list[MemoryEntry]`` directly or an awaitable resolving to
+        that list.
+        """
 
     @abstractmethod
     def flush(self, session_id: str) -> Any:
-        """Persist or clear buffered session state."""
+        """Persist or clear buffered session state.
+
+        May return ``None`` directly or an awaitable resolving to ``None``.
+        """
 
     def consolidate(self, session_id: str) -> Any:
-        """Optional hook for summarization or compaction."""
+        """Optional hook for summarization or compaction.
+
+        May return ``None`` directly or an awaitable resolving to ``None``.
+        """
         return None
 
     def as_memory_module(self) -> MemoryModule:

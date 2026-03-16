@@ -7,6 +7,8 @@ slug: /memory-examples
 
 This page shows a complete custom memory backend built on `MemoryBackend`.
 
+Custom memory methods can be synchronous or asynchronous. This example uses `async def`.
+
 ## In-memory example
 
 ```python
@@ -19,12 +21,12 @@ class ExampleMemory(MemoryBackend):
     def __init__(self) -> None:
         self._sessions: dict[str, list[tuple[str, str]]] = {}
 
-    def record(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
+    async def record(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
         exchanges = self._sessions.setdefault(session_id, [])
         exchanges.append(("user", user_msg))
         exchanges.append(("assistant", assistant_msg))
 
-    def recall(
+    async def recall(
         self,
         session_id: str,
         query: str,
@@ -43,7 +45,7 @@ class ExampleMemory(MemoryBackend):
             for index, (role, content) in enumerate(recent)
         ]
 
-    def flush(self, session_id: str) -> None:
+    async def flush(self, session_id: str) -> None:
         self._sessions.setdefault(session_id, [])
 
 
@@ -64,3 +66,4 @@ print(result.output)
 - This example keeps memory in process-local Python state.
 - Real backends can store entries in a database, file, cache, or vector store.
 - `recall()` decides which `MemoryEntry` values to return for the current query.
+- If your backend does not need async work, you can implement the same methods with plain synchronous `def` functions instead.

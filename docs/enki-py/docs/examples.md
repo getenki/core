@@ -84,6 +84,8 @@ agent = enki_py.EnkiAgent.with_tools(
 
 See [Memory Backends](/docs/memory-backends) for the API and [Memory Examples](/docs/memory-examples) for a full example.
 
+Custom memory callbacks support both synchronous functions and `async def` methods.
+
 ## File-organization review agent
 
 A larger end-to-end agent can combine:
