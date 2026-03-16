@@ -22,7 +22,7 @@ uv add enki-py
 It exposes two layers:
 
 - A generated low-level API built around `EnkiAgent`, `EnkiTool`, and `EnkiToolHandler`
-- A higher-level Python wrapper in `enki_py.agent` that adds decorator-based tools, dependency injection, and sync helpers
+- A higher-level Python wrapper in `enki_py.agent` that adds decorator-based tools, custom memory backends, dependency injection, and sync helpers
 
 ## What to use
 
@@ -82,6 +82,8 @@ agent = enki_py.EnkiAgent(
 
 - [Installation](/docs/installation)
 - [Getting Started Guide](/docs/agent-wrapper)
+- [Memory Backends](/docs/memory-backends)
+- [Memory Examples](/docs/memory-examples)
 - [Low-level API](/docs/low-level-api)
 - [Examples](/docs/examples)
 - [FAQ](/docs/faq)

@@ -11,6 +11,10 @@ The wrapper exposes:
 
 - `Agent`
 - `AgentRunResult`
+- `MemoryBackend`
+- `MemoryEntry`
+- `MemoryKind`
+- `MemoryModule`
 - `RunContext`
 - `Tool`
 
@@ -38,6 +42,16 @@ Common constructor parameters:
 - `max_iterations`: backend iteration limit
 - `workspace_home`: optional workspace root path
 - `tools`: optional list of prebuilt `Tool` instances
+- `memories`: optional list of prebuilt `MemoryModule` instances
+
+## Register memory
+
+Use `MemoryBackend` as the extension point for custom memory. Implement the abstract methods, then pass `backend.as_memory_module()` to the agent.
+
+See:
+
+- [Memory Backends](/docs/memory-backends)
+- [Memory Examples](/docs/memory-examples)
 
 ## Register tools
 
