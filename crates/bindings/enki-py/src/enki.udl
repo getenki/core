@@ -7,8 +7,34 @@ dictionary EnkiTool {
   string parameters_json;
 };
 
+enum EnkiMemoryKind {
+  "RecentMessage",
+  "Summary",
+  "Entity",
+  "Preference",
+};
+
+dictionary EnkiMemoryEntry {
+  string key;
+  string content;
+  EnkiMemoryKind kind;
+  float relevance;
+  u64 timestamp_ns;
+};
+
+dictionary EnkiMemoryModule {
+  string name;
+};
+
 callback interface EnkiToolHandler {
   string execute(string tool_name, string args_json, string agent_dir, string workspace_dir, string sessions_dir);
+};
+
+callback interface EnkiMemoryHandler {
+  void record(string memory_name, string session_id, string user_msg, string assistant_msg);
+  sequence<EnkiMemoryEntry> recall(string memory_name, string session_id, string query, u32 max_entries);
+  void flush(string memory_name, string session_id);
+  void consolidate(string memory_name, string session_id);
 };
 
 interface EnkiAgent {
@@ -30,6 +56,30 @@ interface EnkiAgent {
     string? workspace_home,
     sequence<EnkiTool> tools,
     EnkiToolHandler handler
+  );
+
+  [Name=with_memory]
+  constructor(
+    string name,
+    string system_prompt_preamble,
+    string model,
+    u32 max_iterations,
+    string? workspace_home,
+    sequence<EnkiMemoryModule> memories,
+    EnkiMemoryHandler handler
+  );
+
+  [Name=with_tools_and_memory]
+  constructor(
+    string name,
+    string system_prompt_preamble,
+    string model,
+    u32 max_iterations,
+    string? workspace_home,
+    sequence<EnkiTool> tools,
+    EnkiToolHandler tool_handler,
+    sequence<EnkiMemoryModule> memories,
+    EnkiMemoryHandler memory_handler
   );
 
   [Async]
