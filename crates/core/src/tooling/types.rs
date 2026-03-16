@@ -1,11 +1,8 @@
 use async_trait::async_trait;
-use futures::future::LocalBoxFuture;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::future::Future;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 pub type ToolRegistry = BTreeMap<String, Box<dyn Tool>>;
 
@@ -14,23 +11,6 @@ pub struct ToolContext {
     pub agent_dir: PathBuf,
     pub workspace_dir: PathBuf,
     pub sessions_dir: PathBuf,
-}
-
-pub trait FromToolValue: Sized {
-    fn from_tool_value(value: Value) -> Result<Self, String>;
-}
-
-impl<T> FromToolValue for T
-where
-    T: DeserializeOwned,
-{
-    fn from_tool_value(value: Value) -> Result<Self, String> {
-        serde_json::from_value(value).map_err(|e| e.to_string())
-    }
-}
-
-pub trait ToolParams: DeserializeOwned {
-    fn schema() -> Value;
 }
 
 pub trait IntoToolOutput {
@@ -62,309 +42,11 @@ where
     }
 }
 
-type BoxedFunctionToolHandler = Box<dyn Fn(&ToolContext, Vec<Value>) -> String>;
-type BoxedAsyncFunctionToolHandler = Box<dyn Fn(ToolContext, Vec<Value>) -> LocalBoxFuture<'static, String>>;
-type BoxedTypedFunctionToolHandler = Box<dyn Fn(&ToolContext, Value) -> String>;
-type BoxedTypedAsyncFunctionToolHandler = Box<dyn Fn(ToolContext, Value) -> LocalBoxFuture<'static, String>>;
-
-pub trait IntoFunctionToolHandler<Args> {
-    fn into_handler(self) -> BoxedFunctionToolHandler;
-}
-
-pub trait IntoAsyncFunctionToolHandler<Args> {
-    fn into_async_handler(self) -> BoxedAsyncFunctionToolHandler;
-}
-
-pub trait IntoTypedFunctionToolHandler<Params> {
-    fn into_typed_handler(self) -> BoxedTypedFunctionToolHandler;
-}
-
-pub trait IntoTypedAsyncFunctionToolHandler<Params> {
-    fn into_typed_async_handler(self) -> BoxedTypedAsyncFunctionToolHandler;
-}
-
-impl<F, R> IntoFunctionToolHandler<()> for F
+pub fn parse_tool_args<T>(args: &Value) -> Result<T, String>
 where
-    F: Fn(&ToolContext) -> R + 'static,
-    R: IntoToolOutput,
+    T: DeserializeOwned,
 {
-    fn into_handler(self) -> BoxedFunctionToolHandler {
-        Box::new(move |ctx, values| {
-            if !values.is_empty() {
-                return format!(
-                    "Error: expected 0 tool arguments, received {}",
-                    values.len()
-                );
-            }
-
-            (self)(ctx).into_tool_output()
-        })
-    }
-}
-
-impl<F, Fut, R> IntoAsyncFunctionToolHandler<()> for F
-where
-    F: Fn(ToolContext) -> Fut + 'static,
-    Fut: Future<Output = R> + 'static,
-    R: IntoToolOutput,
-{
-    fn into_async_handler(self) -> BoxedAsyncFunctionToolHandler {
-        let handler = Arc::new(self);
-        Box::new(move |ctx, values| {
-            let handler = Arc::clone(&handler);
-            Box::pin(async move {
-                if !values.is_empty() {
-                    return format!(
-                        "Error: expected 0 tool arguments, received {}",
-                        values.len()
-                    );
-                }
-
-                (handler)(ctx).await.into_tool_output()
-            })
-        })
-    }
-}
-
-impl<F, P, R> IntoTypedFunctionToolHandler<P> for F
-where
-    F: Fn(&ToolContext, P) -> R + 'static,
-    P: ToolParams + 'static,
-    R: IntoToolOutput,
-{
-    fn into_typed_handler(self) -> BoxedTypedFunctionToolHandler {
-        Box::new(move |ctx, args| match P::from_tool_value(args) {
-            Ok(params) => (self)(ctx, params).into_tool_output(),
-            Err(error) => format!("Error: failed to parse tool arguments: {error}"),
-        })
-    }
-}
-
-impl<F, Fut, P, R> IntoTypedAsyncFunctionToolHandler<P> for F
-where
-    F: Fn(ToolContext, P) -> Fut + 'static,
-    Fut: Future<Output = R> + 'static,
-    P: ToolParams + 'static,
-    R: IntoToolOutput,
-{
-    fn into_typed_async_handler(self) -> BoxedTypedAsyncFunctionToolHandler {
-        let handler = Arc::new(self);
-        Box::new(move |ctx, args| {
-            let handler = Arc::clone(&handler);
-            Box::pin(async move {
-                match P::from_tool_value(args) {
-                    Ok(params) => (handler)(ctx, params).await.into_tool_output(),
-                    Err(error) => format!("Error: failed to parse tool arguments: {error}"),
-                }
-            })
-        })
-    }
-}
-
-macro_rules! impl_into_function_tool_handler {
-    ($($arg:ident => $idx:tt),* $(,)?) => {
-        #[allow(non_snake_case)]
-        impl<F, R, $($arg),*> IntoFunctionToolHandler<($($arg,)*)> for F
-        where
-            F: Fn(&ToolContext, $($arg),*) -> R + 'static,
-            R: IntoToolOutput,
-            $($arg: FromToolValue + 'static),*
-        {
-            fn into_handler(self) -> BoxedFunctionToolHandler {
-                Box::new(move |ctx, values| {
-                    let expected = [$($idx),*].len();
-                    if values.len() != expected {
-                        return format!(
-                            "Error: expected {expected} tool arguments, received {}",
-                            values.len()
-                        );
-                    }
-
-                    $(
-                        let $arg = match <$arg as FromToolValue>::from_tool_value(values[$idx].clone()) {
-                            Ok(value) => value,
-                            Err(error) => {
-                                return format!(
-                                    "Error: failed to parse tool argument at index {}: {error}",
-                                    $idx
-                                );
-                            }
-                        };
-                    )*
-
-                    (self)(ctx, $($arg),*).into_tool_output()
-                })
-            }
-        }
-    };
-}
-
-macro_rules! impl_into_async_function_tool_handler {
-    ($($arg:ident => $idx:tt),* $(,)?) => {
-        #[allow(non_snake_case)]
-        impl<F, Fut, R, $($arg),*> IntoAsyncFunctionToolHandler<($($arg,)*)> for F
-        where
-            F: Fn(ToolContext, $($arg),*) -> Fut + 'static,
-            Fut: Future<Output = R> + 'static,
-            R: IntoToolOutput,
-            $($arg: FromToolValue + 'static),*
-        {
-            fn into_async_handler(self) -> BoxedAsyncFunctionToolHandler {
-                let handler = Arc::new(self);
-                Box::new(move |ctx, values| {
-                    let handler = Arc::clone(&handler);
-                    Box::pin(async move {
-                        let expected = [$($idx),*].len();
-                        if values.len() != expected {
-                            return format!(
-                                "Error: expected {expected} tool arguments, received {}",
-                                values.len()
-                            );
-                        }
-
-                        $(
-                            let $arg = match <$arg as FromToolValue>::from_tool_value(values[$idx].clone()) {
-                                Ok(value) => value,
-                                Err(error) => {
-                                    return format!(
-                                        "Error: failed to parse tool argument at index {}: {error}",
-                                        $idx
-                                    );
-                                }
-                            };
-                        )*
-
-                        (handler)(ctx, $($arg),*).await.into_tool_output()
-                    })
-                })
-            }
-        }
-    };
-}
-
-impl_into_function_tool_handler!(A0 => 0);
-impl_into_function_tool_handler!(A0 => 0, A1 => 1);
-impl_into_function_tool_handler!(A0 => 0, A1 => 1, A2 => 2);
-impl_into_function_tool_handler!(A0 => 0, A1 => 1, A2 => 2, A3 => 3);
-impl_into_function_tool_handler!(A0 => 0, A1 => 1, A2 => 2, A3 => 3, A4 => 4);
-impl_into_function_tool_handler!(A0 => 0, A1 => 1, A2 => 2, A3 => 3, A4 => 4, A5 => 5);
-impl_into_async_function_tool_handler!(A0 => 0);
-impl_into_async_function_tool_handler!(A0 => 0, A1 => 1);
-impl_into_async_function_tool_handler!(A0 => 0, A1 => 1, A2 => 2);
-impl_into_async_function_tool_handler!(A0 => 0, A1 => 1, A2 => 2, A3 => 3);
-impl_into_async_function_tool_handler!(A0 => 0, A1 => 1, A2 => 2, A3 => 3, A4 => 4);
-impl_into_async_function_tool_handler!(A0 => 0, A1 => 1, A2 => 2, A3 => 3, A4 => 4, A5 => 5);
-
-enum FunctionToolHandler {
-    Sync(BoxedFunctionToolHandler),
-    Async(BoxedAsyncFunctionToolHandler),
-    TypedSync(BoxedTypedFunctionToolHandler),
-    TypedAsync(BoxedTypedAsyncFunctionToolHandler),
-}
-
-pub struct FunctionTool {
-    name: String,
-    description: String,
-    parameters: Value,
-    param_names: Option<Vec<String>>,
-    handler: FunctionToolHandler,
-}
-
-impl FunctionTool {
-    pub fn from_fn<Args, F>(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        parameters: Value,
-        param_names: impl IntoIterator<Item = impl Into<String>>,
-        handler: F,
-    ) -> Self
-    where
-        F: IntoFunctionToolHandler<Args>,
-    {
-        Self {
-            name: name.into(),
-            description: description.into(),
-            parameters,
-            param_names: Some(param_names.into_iter().map(Into::into).collect()),
-            handler: FunctionToolHandler::Sync(handler.into_handler()),
-        }
-    }
-
-    pub fn from_async_fn<Args, F>(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        parameters: Value,
-        param_names: impl IntoIterator<Item = impl Into<String>>,
-        handler: F,
-    ) -> Self
-    where
-        F: IntoAsyncFunctionToolHandler<Args>,
-    {
-        Self {
-            name: name.into(),
-            description: description.into(),
-            parameters,
-            param_names: Some(param_names.into_iter().map(Into::into).collect()),
-            handler: FunctionToolHandler::Async(handler.into_async_handler()),
-        }
-    }
-
-    pub fn from_typed_fn<P, F>(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        handler: F,
-    ) -> Self
-    where
-        P: ToolParams + 'static,
-        F: IntoTypedFunctionToolHandler<P>,
-    {
-        Self {
-            name: name.into(),
-            description: description.into(),
-            parameters: P::schema(),
-            param_names: None,
-            handler: FunctionToolHandler::TypedSync(handler.into_typed_handler()),
-        }
-    }
-
-    pub fn from_typed_async_fn<P, F>(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        handler: F,
-    ) -> Self
-    where
-        P: ToolParams + 'static,
-        F: IntoTypedAsyncFunctionToolHandler<P>,
-    {
-        Self {
-            name: name.into(),
-            description: description.into(),
-            parameters: P::schema(),
-            param_names: None,
-            handler: FunctionToolHandler::TypedAsync(handler.into_typed_async_handler()),
-        }
-    }
-
-    fn ordered_values(&self, args: &Value) -> Result<Vec<Value>, String> {
-        let Some(param_names) = &self.param_names else {
-            return Err("tool arguments are not positional for this tool".to_string());
-        };
-
-        match args {
-            Value::Array(values) => Ok(values.clone()),
-            Value::Object(map) => param_names
-                .iter()
-                .map(|name| {
-                    map.get(name)
-                        .cloned()
-                        .ok_or_else(|| format!("missing required tool argument '{name}'"))
-                })
-                .collect(),
-            Value::Null => Ok(Vec::new()),
-            _ if param_names.len() == 1 => Ok(vec![args.clone()]),
-            _ => Err("tool arguments must be a JSON object or array".to_string()),
-        }
-    }
+    serde_json::from_value(args.clone()).map_err(|e| e.to_string())
 }
 
 #[async_trait(?Send)]
@@ -393,36 +75,6 @@ pub trait Tool {
     }
 }
 
-#[async_trait(?Send)]
-impl Tool for FunctionTool {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn description(&self) -> &str {
-        &self.description
-    }
-
-    fn parameters(&self) -> Value {
-        self.parameters.clone()
-    }
-
-    async fn execute(&self, args: &Value, ctx: &ToolContext) -> String {
-        match &self.handler {
-            FunctionToolHandler::Sync(handler) => match self.ordered_values(args) {
-                Ok(values) => handler(ctx, values),
-                Err(error) => format!("Error: {error}"),
-            },
-            FunctionToolHandler::Async(handler) => match self.ordered_values(args) {
-                Ok(values) => handler(ctx.clone(), values).await,
-                Err(error) => format!("Error: {error}"),
-            },
-            FunctionToolHandler::TypedSync(handler) => handler(ctx, args.clone()),
-            FunctionToolHandler::TypedAsync(handler) => handler(ctx.clone(), args.clone()).await,
-        }
-    }
-}
-
 #[derive(Default)]
 pub struct ToolRegistryBuilder {
     tools: ToolRegistry,
@@ -446,68 +98,6 @@ impl ToolRegistryBuilder {
         self
     }
 
-    pub fn register_fn<Args, F>(
-        mut self,
-        name: impl Into<String>,
-        description: impl Into<String>,
-        parameters: Value,
-        param_names: impl IntoIterator<Item = impl Into<String>>,
-        handler: F,
-    ) -> Self
-    where
-        F: IntoFunctionToolHandler<Args> + 'static,
-    {
-        let tool = FunctionTool::from_fn(name, description, parameters, param_names, handler);
-        self.tools.insert(tool.name().to_string(), Box::new(tool));
-        self
-    }
-
-    pub fn register_async_fn<Args, F>(
-        mut self,
-        name: impl Into<String>,
-        description: impl Into<String>,
-        parameters: Value,
-        param_names: impl IntoIterator<Item = impl Into<String>>,
-        handler: F,
-    ) -> Self
-    where
-        F: IntoAsyncFunctionToolHandler<Args> + 'static,
-    {
-        let tool = FunctionTool::from_async_fn(name, description, parameters, param_names, handler);
-        self.tools.insert(tool.name().to_string(), Box::new(tool));
-        self
-    }
-
-    pub fn register_typed_fn<P, F>(
-        mut self,
-        name: impl Into<String>,
-        description: impl Into<String>,
-        handler: F,
-    ) -> Self
-    where
-        P: ToolParams + 'static,
-        F: IntoTypedFunctionToolHandler<P> + 'static,
-    {
-        let tool = FunctionTool::from_typed_fn::<P, F>(name, description, handler);
-        self.tools.insert(tool.name().to_string(), Box::new(tool));
-        self
-    }
-
-    pub fn register_typed_async_fn<P, F>(
-        mut self,
-        name: impl Into<String>,
-        description: impl Into<String>,
-        handler: F,
-    ) -> Self
-    where
-        P: ToolParams + 'static,
-        F: IntoTypedAsyncFunctionToolHandler<P> + 'static,
-    {
-        let tool = FunctionTool::from_typed_async_fn::<P, F>(name, description, handler);
-        self.tools.insert(tool.name().to_string(), Box::new(tool));
-        self
-    }
-
     pub fn build(self) -> ToolRegistry {
         self.tools
     }
@@ -515,7 +105,8 @@ impl ToolRegistryBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::{FunctionTool, Tool, ToolContext, ToolParams, ToolRegistryBuilder};
+    use super::{Tool, ToolContext, ToolRegistryBuilder, parse_tool_args};
+    use async_trait::async_trait;
     use serde::Deserialize;
     use serde_json::{Value, json};
     use std::path::PathBuf;
@@ -528,61 +119,98 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn function_tool_maps_named_object_args_to_function_params() {
-        fn join_paths(ctx: &ToolContext, path: String, suffix: String) -> String {
-            format!("{}/{}{}", ctx.workspace_dir.display(), path, suffix)
+    #[derive(Deserialize)]
+    struct EchoParams {
+        value: String,
+    }
+
+    struct EchoTool;
+
+    #[async_trait(?Send)]
+    impl Tool for EchoTool {
+        fn name(&self) -> &str {
+            "echo"
         }
 
-        let tool = FunctionTool::from_fn(
-            "join_paths",
-            "Join values",
+        fn description(&self) -> &str {
+            "Echo a value"
+        }
+
+        fn parameters(&self) -> Value {
             json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string" },
-                    "suffix": { "type": "string" }
+                    "value": { "type": "string" }
                 },
-                "required": ["path", "suffix"]
-            }),
-            ["path", "suffix"],
-            join_paths,
-        );
+                "required": ["value"]
+            })
+        }
 
-        let result = tool
-            .execute(
-                &json!({
-                    "suffix": ".md",
-                    "path": "note"
-                }),
-                &tool_context(),
-            )
-            .await;
+        async fn execute(&self, args: &Value, _ctx: &ToolContext) -> String {
+            let params: EchoParams = match parse_tool_args(args) {
+                Ok(params) => params,
+                Err(error) => return format!("Error: failed to parse tool arguments: {error}"),
+            };
 
-        assert!(result.ends_with("workspace/note.md"));
+            format!("echo:{}", params.value)
+        }
+    }
+
+    struct EchoWithWorkspaceTool;
+
+    #[async_trait(?Send)]
+    impl Tool for EchoWithWorkspaceTool {
+        fn name(&self) -> &str {
+            "echo_workspace"
+        }
+
+        fn description(&self) -> &str {
+            "Echo a value with workspace context"
+        }
+
+        fn parameters(&self) -> Value {
+            EchoTool.parameters()
+        }
+
+        async fn execute(&self, args: &Value, ctx: &ToolContext) -> String {
+            let params: EchoParams = match parse_tool_args(args) {
+                Ok(params) => params,
+                Err(error) => return format!("Error: failed to parse tool arguments: {error}"),
+            };
+
+            format!("{}:{}", ctx.workspace_dir.display(), params.value)
+        }
+    }
+
+    struct EchoAsyncTool;
+
+    #[async_trait(?Send)]
+    impl Tool for EchoAsyncTool {
+        fn name(&self) -> &str {
+            "echo_async"
+        }
+
+        fn description(&self) -> &str {
+            "Echo a value asynchronously"
+        }
+
+        fn parameters(&self) -> Value {
+            EchoTool.parameters()
+        }
+
+        async fn execute(&self, args: &Value, _ctx: &ToolContext) -> String {
+            let params: EchoParams = match parse_tool_args(args) {
+                Ok(params) => params,
+                Err(error) => return format!("Error: failed to parse tool arguments: {error}"),
+            };
+
+            format!("async:{}", params.value)
+        }
     }
 
     #[tokio::test]
-    async fn registry_builder_registers_function_tools() {
-        fn echo(_ctx: &ToolContext, value: String) -> String {
-            format!("echo:{value}")
-        }
-
-        let registry = ToolRegistryBuilder::new()
-            .register_fn(
-                "echo",
-                "Echo a value",
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "value": { "type": "string" }
-                    },
-                    "required": ["value"]
-                }),
-                ["value"],
-                echo,
-            )
-            .build();
+    async fn registry_builder_registers_concrete_tools() {
+        let registry = ToolRegistryBuilder::new().register(EchoTool).build();
 
         let result = registry
             .get("echo")
@@ -594,26 +222,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registry_builder_registers_async_function_tools() {
-        async fn echo_async(_ctx: ToolContext, value: String) -> String {
-            format!("async:{value}")
-        }
-
+    async fn concrete_tools_can_use_context() {
         let registry = ToolRegistryBuilder::new()
-            .register_async_fn(
-                "echo_async",
-                "Echo a value asynchronously",
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "value": { "type": "string" }
-                    },
-                    "required": ["value"]
-                }),
-                ["value"],
-                echo_async,
-            )
+            .register(EchoWithWorkspaceTool)
             .build();
+
+        let result = registry
+            .get("echo_workspace")
+            .unwrap()
+            .execute(&json!({ "value": "hello" }), &tool_context())
+            .await;
+
+        assert!(result.ends_with("workspace:hello"));
+    }
+
+    #[tokio::test]
+    async fn concrete_tools_can_execute_async_logic() {
+        let registry = ToolRegistryBuilder::new().register(EchoAsyncTool).build();
 
         let result = registry
             .get("echo_async")
@@ -624,62 +249,12 @@ mod tests {
         assert_eq!(result, "async:hello");
     }
 
-    #[derive(Deserialize)]
-    struct EchoParams {
-        value: String,
-    }
-
-    impl ToolParams for EchoParams {
-        fn schema() -> Value {
-            json!({
-                "type": "object",
-                "properties": {
-                    "value": { "type": "string" }
-                },
-                "required": ["value"]
-            })
-        }
-    }
-
     #[tokio::test]
-    async fn registry_builder_registers_typed_function_tools() {
-        fn echo(_ctx: &ToolContext, params: EchoParams) -> String {
-            format!("typed:{}", params.value)
-        }
-
-        let registry = ToolRegistryBuilder::new()
-            .register_typed_fn::<EchoParams, _>("echo_typed", "Echo a typed value", echo)
-            .build();
-
-        let result = registry
-            .get("echo_typed")
-            .unwrap()
-            .execute(&json!({ "value": "hello" }), &tool_context())
+    async fn parse_tool_args_reports_invalid_arguments() {
+        let result = EchoTool
+            .execute(&json!({ "other": "hello" }), &tool_context())
             .await;
 
-        assert_eq!(result, "typed:hello");
-    }
-
-    #[tokio::test]
-    async fn registry_builder_registers_typed_async_function_tools() {
-        async fn echo_async(_ctx: ToolContext, params: EchoParams) -> String {
-            format!("typed-async:{}", params.value)
-        }
-
-        let registry = ToolRegistryBuilder::new()
-            .register_typed_async_fn::<EchoParams, _>(
-                "echo_typed_async",
-                "Echo a typed value asynchronously",
-                echo_async,
-            )
-            .build();
-
-        let result = registry
-            .get("echo_typed_async")
-            .unwrap()
-            .execute(&json!({ "value": "hello" }), &tool_context())
-            .await;
-
-        assert_eq!(result, "typed-async:hello");
+        assert!(result.starts_with("Error: failed to parse tool arguments:"));
     }
 }

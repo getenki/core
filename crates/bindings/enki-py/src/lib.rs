@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 #[derive(Clone, Debug)]
-pub struct EnkiToolSpec {
+pub struct EnkiTool {
     pub name: String,
     pub description: String,
     pub parameters_json: String,
@@ -58,7 +58,7 @@ impl Tool for PythonTool {
 }
 
 fn build_tool_registry(
-    tools: Vec<EnkiToolSpec>,
+    tools: Vec<EnkiTool>,
     handler: Arc<dyn EnkiToolHandler>,
 ) -> Result<ToolRegistry, String> {
     let mut registry = ToolRegistry::new();
@@ -118,7 +118,7 @@ impl EnkiAgent {
         model: String,
         max_iterations: u32,
         workspace_home: Option<String>,
-        tools: Vec<EnkiToolSpec>,
+        tools: Vec<EnkiTool>,
         handler: Box<dyn EnkiToolHandler>,
     ) -> Self {
         let definition = AgentDefinition {
@@ -191,7 +191,7 @@ impl EnkiAgent {
     fn from_custom_tools(
         definition: AgentDefinition,
         workspace_home: Option<String>,
-        tools: Vec<EnkiToolSpec>,
+        tools: Vec<EnkiTool>,
         handler: Box<dyn EnkiToolHandler>,
     ) -> Self {
         let workspace_home = workspace_home.map(PathBuf::from);

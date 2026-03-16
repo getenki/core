@@ -512,7 +512,7 @@ def _uniffi_check_contract_api_version(lib):
 def _uniffi_check_api_checksums(lib):
     if lib.uniffi_enki_py_checksum_constructor_enkiagent_new() != 48417:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_enki_py_checksum_constructor_enkiagent_with_tools() != 1398:
+    if lib.uniffi_enki_py_checksum_constructor_enkiagent_with_tools() != 22411:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_enki_py_checksum_method_enkiagent_run() != 59297:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -948,7 +948,7 @@ class _UniffiFfiConverterString:
             return builder.finalize()
 
 @dataclass
-class EnkiToolSpec:
+class EnkiTool:
     def __init__(self, *, name:str, description:str, parameters_json:str):
         self.name = name
         self.description = description
@@ -958,7 +958,7 @@ class EnkiToolSpec:
 
     
     def __str__(self):
-        return "EnkiToolSpec(name={}, description={}, parameters_json={})".format(self.name, self.description, self.parameters_json)
+        return "EnkiTool(name={}, description={}, parameters_json={})".format(self.name, self.description, self.parameters_json)
     def __eq__(self, other):
         if self.name != other.name:
             return False
@@ -968,10 +968,10 @@ class EnkiToolSpec:
             return False
         return True
 
-class _UniffiFfiConverterTypeEnkiToolSpec(_UniffiConverterRustBuffer):
+class _UniffiFfiConverterTypeEnkiTool(_UniffiConverterRustBuffer):
     @staticmethod
     def read(buf):
-        return EnkiToolSpec(
+        return EnkiTool(
             name=_UniffiFfiConverterString.read(buf),
             description=_UniffiFfiConverterString.read(buf),
             parameters_json=_UniffiFfiConverterString.read(buf),
@@ -1025,7 +1025,7 @@ class EnkiAgent(EnkiAgentProtocol):
         )
         self._handle = _uniffi_ffi_result
     @classmethod
-    def with_tools(cls, name: str,system_prompt_preamble: str,model: str,max_iterations: int,workspace_home: typing.Optional[str],tools: typing.List[EnkiToolSpec],handler: EnkiToolHandler) -> EnkiAgent:
+    def with_tools(cls, name: str,system_prompt_preamble: str,model: str,max_iterations: int,workspace_home: typing.Optional[str],tools: typing.List[EnkiTool],handler: EnkiToolHandler) -> EnkiAgent:
         
         _UniffiFfiConverterString.check_lower(name)
 
@@ -1037,7 +1037,7 @@ class EnkiAgent(EnkiAgentProtocol):
 
         _UniffiFfiConverterOptionalString.check_lower(workspace_home)
 
-        _UniffiFfiConverterSequenceTypeEnkiToolSpec.check_lower(tools)
+        _UniffiFfiConverterSequenceTypeEnkiTool.check_lower(tools)
 
         _UniffiFfiConverterTypeEnkiToolHandler.check_lower(handler)
         _uniffi_lowered_args = (
@@ -1046,7 +1046,7 @@ class EnkiAgent(EnkiAgentProtocol):
             _UniffiFfiConverterString.lower(model),
             _UniffiFfiConverterUInt32.lower(max_iterations),
             _UniffiFfiConverterOptionalString.lower(workspace_home),
-            _UniffiFfiConverterSequenceTypeEnkiToolSpec.lower(tools),
+            _UniffiFfiConverterSequenceTypeEnkiTool.lower(tools),
             _UniffiFfiConverterTypeEnkiToolHandler.lower(handler),
         )
         _uniffi_lift_return = _UniffiFfiConverterTypeEnkiAgent.lift
@@ -1219,18 +1219,18 @@ class _UniffiFfiConverterOptionalString(_UniffiConverterRustBuffer):
         else:
             raise InternalError("Unexpected flag byte for optional type")
 
-class _UniffiFfiConverterSequenceTypeEnkiToolSpec(_UniffiConverterRustBuffer):
+class _UniffiFfiConverterSequenceTypeEnkiTool(_UniffiConverterRustBuffer):
     @classmethod
     def check_lower(cls, value):
         for item in value:
-            _UniffiFfiConverterTypeEnkiToolSpec.check_lower(item)
+            _UniffiFfiConverterTypeEnkiTool.check_lower(item)
 
     @classmethod
     def write(cls, value, buf):
         items = len(value)
         buf.write_i32(items)
         for item in value:
-            _UniffiFfiConverterTypeEnkiToolSpec.write(item, buf)
+            _UniffiFfiConverterTypeEnkiTool.write(item, buf)
 
     @classmethod
     def read(cls, buf):
@@ -1239,12 +1239,12 @@ class _UniffiFfiConverterSequenceTypeEnkiToolSpec(_UniffiConverterRustBuffer):
             raise InternalError("Unexpected negative sequence length")
 
         return [
-            _UniffiFfiConverterTypeEnkiToolSpec.read(buf) for i in range(count)
+            _UniffiFfiConverterTypeEnkiTool.read(buf) for i in range(count)
         ]
 
 __all__ = [
     "InternalError",
-    "EnkiToolSpec",
+    "EnkiTool",
     "EnkiAgent",
     "EnkiAgentProtocol",
     "EnkiToolHandler",

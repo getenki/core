@@ -3,11 +3,7 @@ use crate::llm::LlmProvider;
 use crate::memory::MemoryManager;
 use crate::runtime::{Runtime, RuntimeHandler, RuntimeRequest, SessionContext};
 use crate::tooling::tool_calling::ToolExecutor;
-use crate::tooling::types::{
-    IntoAsyncFunctionToolHandler, IntoFunctionToolHandler, IntoTypedAsyncFunctionToolHandler,
-    IntoTypedFunctionToolHandler, Tool, ToolParams, ToolRegistry,
-};
-use serde_json::Value;
+use crate::tooling::types::{Tool, ToolRegistry};
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -59,92 +55,6 @@ impl RuntimeBuilder {
 
     pub fn register_boxed_tool(mut self, tool: Box<dyn Tool>) -> Self {
         self.tool_registry.insert(tool.name().to_string(), tool);
-        self
-    }
-
-    pub fn register_fn<Args, F>(
-        mut self,
-        name: impl Into<String>,
-        description: impl Into<String>,
-        parameters: Value,
-        param_names: impl IntoIterator<Item = impl Into<String>>,
-        handler: F,
-    ) -> Self
-    where
-        F: IntoFunctionToolHandler<Args> + 'static,
-    {
-        let tool = crate::tooling::types::FunctionTool::from_fn(
-            name,
-            description,
-            parameters,
-            param_names,
-            handler,
-        );
-        self.tool_registry
-            .insert(tool.name().to_string(), Box::new(tool));
-        self
-    }
-
-    pub fn register_async_fn<Args, F>(
-        mut self,
-        name: impl Into<String>,
-        description: impl Into<String>,
-        parameters: Value,
-        param_names: impl IntoIterator<Item = impl Into<String>>,
-        handler: F,
-    ) -> Self
-    where
-        F: IntoAsyncFunctionToolHandler<Args> + 'static,
-    {
-        let tool = crate::tooling::types::FunctionTool::from_async_fn(
-            name,
-            description,
-            parameters,
-            param_names,
-            handler,
-        );
-        self.tool_registry
-            .insert(tool.name().to_string(), Box::new(tool));
-        self
-    }
-
-    pub fn register_typed_fn<P, F>(
-        mut self,
-        name: impl Into<String>,
-        description: impl Into<String>,
-        handler: F,
-    ) -> Self
-    where
-        P: ToolParams + 'static,
-        F: IntoTypedFunctionToolHandler<P> + 'static,
-    {
-        let tool = crate::tooling::types::FunctionTool::from_typed_fn::<P, F>(
-            name,
-            description,
-            handler,
-        );
-        self.tool_registry
-            .insert(tool.name().to_string(), Box::new(tool));
-        self
-    }
-
-    pub fn register_typed_async_fn<P, F>(
-        mut self,
-        name: impl Into<String>,
-        description: impl Into<String>,
-        handler: F,
-    ) -> Self
-    where
-        P: ToolParams + 'static,
-        F: IntoTypedAsyncFunctionToolHandler<P> + 'static,
-    {
-        let tool = crate::tooling::types::FunctionTool::from_typed_async_fn::<P, F>(
-            name,
-            description,
-            handler,
-        );
-        self.tool_registry
-            .insert(tool.name().to_string(), Box::new(tool));
         self
     }
 
@@ -218,7 +128,7 @@ mod tests {
         ToolDefinition,
     };
     use crate::runtime::RuntimeRequest;
-    use crate::tooling::types::{ToolContext, ToolParams};
+    use crate::tooling::types::{Tool, ToolContext, parse_tool_args};
     use async_trait::async_trait;
     use futures::stream;
     use serde::Deserialize;
@@ -305,8 +215,19 @@ mod tests {
         value: String,
     }
 
-    impl ToolParams for EchoParams {
-        fn schema() -> Value {
+    struct EchoTool;
+
+    #[async_trait(?Send)]
+    impl Tool for EchoTool {
+        fn name(&self) -> &str {
+            "echo"
+        }
+
+        fn description(&self) -> &str {
+            "Echo a value"
+        }
+
+        fn parameters(&self) -> Value {
             json!({
                 "type": "object",
                 "properties": {
@@ -315,14 +236,19 @@ mod tests {
                 "required": ["value"]
             })
         }
+
+        async fn execute(&self, args: &Value, _ctx: &ToolContext) -> String {
+            let params: EchoParams = match parse_tool_args(args) {
+                Ok(params) => params,
+                Err(error) => return format!("Error: failed to parse tool arguments: {error}"),
+            };
+
+            format!("echo:{}", params.value)
+        }
     }
 
     #[tokio::test]
     async fn runtime_builder_registers_dynamic_typed_tools() {
-        async fn echo_tool(_ctx: ToolContext, params: EchoParams) -> String {
-            format!("echo:{}", params.value)
-        }
-
         let llm = RecordingLlm::new(vec![LlmResponse {
             content: "ok".to_string(),
             usage: None,
@@ -334,7 +260,7 @@ mod tests {
         let runtime = RuntimeBuilder::new(AgentDefinition::default())
             .with_llm(Box::new(llm.clone()))
             .with_workspace_home(temp_home("dynamic-tools"))
-            .register_typed_async_fn::<EchoParams, _>("echo", "Echo a value", echo_tool)
+            .register_tool(EchoTool)
             .build()
             .await
             .unwrap();

@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from typing import Any, Callable, Generic, Optional, TypeVar, Union, get_args, get_origin
 
 from .enki_py import EnkiAgent as _LowLevelEnkiAgent
-from .enki_py import EnkiToolHandler, EnkiToolSpec
+from .enki_py import EnkiToolHandler
+try:
+    from .enki_py import EnkiTool as _LowLevelTool
+except ImportError:  # pragma: no cover
+    from .enki_py import EnkiToolSpec as _LowLevelTool
 
 
 DepsT = TypeVar("DepsT")
@@ -26,15 +30,44 @@ class AgentRunResult:
 
 
 @dataclass(frozen=True)
-class _RegisteredTool:
+class Tool:
     name: str
+    description: str
+    parameters_json: str
     func: Callable[..., Any]
     uses_context: bool
-    parameters_json: str
+
+    @classmethod
+    def from_function(
+        cls,
+        func: Callable[..., Any],
+        *,
+        uses_context: bool,
+        name: str | None = None,
+        description: str | None = None,
+        parameters_json: str | None = None,
+    ) -> Tool:
+        tool_name = name or func.__name__
+        tool_description = description or inspect.getdoc(func) or ""
+        tool_parameters_json = parameters_json or _build_parameters_json(func, uses_context)
+        return cls(
+            name=tool_name,
+            description=tool_description,
+            parameters_json=tool_parameters_json,
+            func=func,
+            uses_context=uses_context,
+        )
+
+    def as_low_level_tool(self) -> _LowLevelTool:
+        return _LowLevelTool(
+            name=self.name,
+            description=self.description,
+            parameters_json=self.parameters_json,
+        )
 
 
 class _PythonToolHandler(EnkiToolHandler):
-    def __init__(self, tools: dict[str, _RegisteredTool]) -> None:
+    def __init__(self, tools: dict[str, Tool]) -> None:
         self._tools = tools
         self._deps_lock = threading.Lock()
         self._current_deps: Any = None
@@ -203,6 +236,7 @@ class Agent(Generic[DepsT]):
         name: str = "Agent",
         max_iterations: int = 20,
         workspace_home: str | None = None,
+        tools: list[Tool] | None = None,
     ) -> None:
         self.model = model
         self.deps_type = deps_type
@@ -210,13 +244,16 @@ class Agent(Generic[DepsT]):
         self.name = name
         self.max_iterations = max_iterations
         self.workspace_home = workspace_home
-        self._tools: dict[str, _RegisteredTool] = {}
+        self._tools: dict[str, Tool] = {}
         self._handler = _PythonToolHandler(self._tools)
         self._backend: Any = None
         self._dirty = True
+        if tools:
+            for tool in tools:
+                self.register_tool(tool)
 
     def tool_plain(self, func: Callable[..., Any]) -> Callable[..., Any]:
-        self._register_tool(func, uses_context=False)
+        self.register_tool(Tool.from_function(func, uses_context=False))
         return func
 
     def tool(self, func: Callable[..., Any]) -> Callable[..., Any]:
@@ -224,28 +261,16 @@ class Agent(Generic[DepsT]):
         parameters = list(signature.parameters.values())
         if not parameters:
             raise TypeError(f"Tool '{func.__name__}' must accept a RunContext argument")
-        self._register_tool(func, uses_context=True)
+        self.register_tool(Tool.from_function(func, uses_context=True))
         return func
 
-    def _register_tool(self, func: Callable[..., Any], *, uses_context: bool) -> None:
-        description = inspect.getdoc(func) or ""
-        self._tools[func.__name__] = _RegisteredTool(
-            name=func.__name__,
-            func=func,
-            uses_context=uses_context,
-            parameters_json=_build_parameters_json(func, uses_context),
-        )
+    def register_tool(self, tool: Tool) -> Tool:
+        self._tools[tool.name] = tool
         self._dirty = True
+        return tool
 
-    def _tool_specs(self) -> list[EnkiToolSpec]:
-        return [
-            EnkiToolSpec(
-                name=tool.name,
-                description=inspect.getdoc(tool.func) or "",
-                parameters_json=tool.parameters_json,
-            )
-            for tool in self._tools.values()
-        ]
+    def _tool_specs(self) -> list[_LowLevelTool]:
+        return [tool.as_low_level_tool() for tool in self._tools.values()]
 
     def _ensure_backend(self) -> Any:
         if self._backend is not None and not self._dirty:
@@ -311,4 +336,4 @@ class Agent(Generic[DepsT]):
         return result_box["result"]
 
 
-__all__ = ["Agent", "AgentRunResult", "RunContext"]
+__all__ = ["Agent", "AgentRunResult", "RunContext", "Tool"]

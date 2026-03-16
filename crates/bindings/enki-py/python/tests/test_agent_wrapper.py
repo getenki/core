@@ -108,3 +108,33 @@ def test_wrapper_builds_tool_schemas_and_passes_runtime_deps(monkeypatch):
         handler.clear_deps()
 
     assert "include_builtin_tools" not in FakeEnkiAgent.last_kwargs
+
+
+def test_wrapper_registers_concrete_tool_objects(monkeypatch):
+    monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
+
+    agent = agent_module.Agent("test-model")
+
+    def format_score(total: int) -> str:
+        """Format a score summary."""
+        return f"score:{total}"
+
+    tool = agent_module.Tool.from_function(format_score, uses_context=False)
+    agent.register_tool(tool)
+
+    result = agent.run_sync("My guess is 1")
+    assert result.output == "No-op"
+
+    tools = FakeEnkiAgent.last_kwargs["tools"]
+    score_spec = next(tool for tool in tools if tool.name == "format_score")
+    assert json.loads(score_spec.parameters_json) == {
+        "type": "object",
+        "properties": {
+            "total": {"type": "integer"},
+        },
+        "additionalProperties": False,
+        "required": ["total"],
+    }
+
+    handler = FakeEnkiAgent.last_kwargs["handler"]
+    assert handler.execute("format_score", json.dumps({"total": 7}), "", "", "") == "score:7"

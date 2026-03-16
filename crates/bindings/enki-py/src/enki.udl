@@ -1,7 +1,7 @@
 namespace enki {
 };
 
-dictionary EnkiToolSpec {
+dictionary EnkiTool {
   string name;
   string description;
   string parameters_json;
@@ -28,7 +28,7 @@ interface EnkiAgent {
     string model,
     u32 max_iterations,
     string? workspace_home,
-    sequence<EnkiToolSpec> tools,
+    sequence<EnkiTool> tools,
     EnkiToolHandler handler
   );
 

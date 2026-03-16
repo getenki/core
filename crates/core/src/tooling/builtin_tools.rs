@@ -1,16 +1,30 @@
-use crate::tooling::types::{ToolContext, ToolParams, ToolRegistry, ToolRegistryBuilder};
+use crate::tooling::types::{
+    Tool, ToolContext, ToolRegistry, ToolRegistryBuilder, parse_tool_args,
+};
+use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::fs;
 use tokio::process::Command;
 
 #[derive(Deserialize)]
-pub struct ReadFileParams {
-    pub path: String,
+struct ReadFileParams {
+    path: String,
 }
 
-impl ToolParams for ReadFileParams {
-    fn schema() -> Value {
+pub struct ReadFileTool;
+
+#[async_trait(?Send)]
+impl Tool for ReadFileTool {
+    fn name(&self) -> &str {
+        "read_file"
+    }
+
+    fn description(&self) -> &str {
+        "Read file content."
+    }
+
+    fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
@@ -19,16 +33,39 @@ impl ToolParams for ReadFileParams {
             "required": ["path"]
         })
     }
+
+    async fn execute(&self, args: &Value, ctx: &ToolContext) -> String {
+        let params: ReadFileParams = match parse_tool_args(args) {
+            Ok(params) => params,
+            Err(error) => return format!("Error: failed to parse tool arguments: {error}"),
+        };
+
+        let resolved = ctx.workspace_dir.join(params.path);
+        fs::read_to_string(&resolved)
+            .await
+            .unwrap_or_else(|_| "File not found.".to_string())
+    }
 }
 
 #[derive(Deserialize)]
-pub struct WriteFileParams {
-    pub path: String,
-    pub content: String,
+struct WriteFileParams {
+    path: String,
+    content: String,
 }
 
-impl ToolParams for WriteFileParams {
-    fn schema() -> Value {
+pub struct WriteFileTool;
+
+#[async_trait(?Send)]
+impl Tool for WriteFileTool {
+    fn name(&self) -> &str {
+        "write_file"
+    }
+
+    fn description(&self) -> &str {
+        "Write content to file."
+    }
+
+    fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
@@ -38,15 +75,43 @@ impl ToolParams for WriteFileParams {
             "required": ["path", "content"]
         })
     }
+
+    async fn execute(&self, args: &Value, ctx: &ToolContext) -> String {
+        let params: WriteFileParams = match parse_tool_args(args) {
+            Ok(params) => params,
+            Err(error) => return format!("Error: failed to parse tool arguments: {error}"),
+        };
+
+        let resolved = ctx.workspace_dir.join(params.path);
+        if let Some(parent) = resolved.parent() {
+            let _ = fs::create_dir_all(parent).await;
+        }
+
+        match fs::write(&resolved, params.content).await {
+            Ok(_) => "File written.".to_string(),
+            Err(error) => format!("Error: {error}"),
+        }
+    }
 }
 
 #[derive(Deserialize)]
-pub struct ExecParams {
-    pub cmd: String,
+struct ExecParams {
+    cmd: String,
 }
 
-impl ToolParams for ExecParams {
-    fn schema() -> Value {
+pub struct ExecTool;
+
+#[async_trait(?Send)]
+impl Tool for ExecTool {
+    fn name(&self) -> &str {
+        "exec"
+    }
+
+    fn description(&self) -> &str {
+        "Execute shell command safely."
+    }
+
+    fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
@@ -55,67 +120,41 @@ impl ToolParams for ExecParams {
             "required": ["cmd"]
         })
     }
-}
 
-pub async fn read_file_tool(ctx: ToolContext, params: ReadFileParams) -> String {
-    let resolved = ctx.workspace_dir.join(params.path);
-    fs::read_to_string(&resolved)
-        .await
-        .unwrap_or_else(|_| "File not found.".to_string())
-}
+    async fn execute(&self, args: &Value, ctx: &ToolContext) -> String {
+        let params: ExecParams = match parse_tool_args(args) {
+            Ok(params) => params,
+            Err(error) => return format!("Error: failed to parse tool arguments: {error}"),
+        };
 
-pub async fn write_file_tool(ctx: ToolContext, params: WriteFileParams) -> String {
-    let resolved = ctx.workspace_dir.join(params.path);
-    if let Some(parent) = resolved.parent() {
-        let _ = fs::create_dir_all(parent).await;
-    }
+        #[cfg(windows)]
+        let (shell, flag) = ("cmd", "/C");
+        #[cfg(not(windows))]
+        let (shell, flag) = ("sh", "-c");
 
-    match fs::write(&resolved, params.content).await {
-        Ok(_) => "File written.".to_string(),
-        Err(error) => format!("Error: {error}"),
-    }
-}
+        match Command::new(shell)
+            .arg(flag)
+            .arg(params.cmd)
+            .current_dir(&ctx.workspace_dir)
+            .output()
+            .await
+        {
+            Ok(result) => {
+                let stdout = String::from_utf8_lossy(&result.stdout);
+                let stderr = String::from_utf8_lossy(&result.stderr);
+                let rc = result.status.code().unwrap_or(-1);
 
-pub async fn exec_tool(ctx: ToolContext, params: ExecParams) -> String {
-    #[cfg(windows)]
-    let (shell, flag) = ("cmd", "/C");
-    #[cfg(not(windows))]
-    let (shell, flag) = ("sh", "-c");
-
-    match Command::new(shell)
-        .arg(flag)
-        .arg(params.cmd)
-        .current_dir(&ctx.workspace_dir)
-        .output()
-        .await
-    {
-        Ok(result) => {
-            let stdout = String::from_utf8_lossy(&result.stdout);
-            let stderr = String::from_utf8_lossy(&result.stderr);
-            let rc = result.status.code().unwrap_or(-1);
-
-            format!("stdout: {stdout}\nstderr: {stderr}\nrc: {rc}")
+                format!("stdout: {stdout}\nstderr: {stderr}\nrc: {rc}")
+            }
+            Err(error) => format!("Exec error: {error}"),
         }
-        Err(error) => format!("Exec error: {error}"),
     }
 }
 
 pub fn default_registry() -> ToolRegistry {
     ToolRegistryBuilder::new()
-        .register_typed_async_fn::<ReadFileParams, _>(
-            "read_file",
-            "Read file content.",
-            read_file_tool,
-        )
-        .register_typed_async_fn::<WriteFileParams, _>(
-            "write_file",
-            "Write content to file.",
-            write_file_tool,
-        )
-        .register_typed_async_fn::<ExecParams, _>(
-            "exec",
-            "Execute shell command safely.",
-            exec_tool,
-        )
+        .register(ReadFileTool)
+        .register(WriteFileTool)
+        .register(ExecTool)
         .build()
 }

@@ -701,9 +701,11 @@ mod tests {
         ChatMessage, LlmConfig, LlmError, LlmProvider, LlmResponse, Result as LlmResult,
         ToolDefinition,
     };
-    use crate::tooling::types::ToolRegistryBuilder;
+    use crate::tooling::types::{Tool, ToolContext, ToolRegistryBuilder, parse_tool_args};
     use async_trait::async_trait;
     use futures::stream;
+    use serde::Deserialize;
+    use serde_json::Value;
     use serde_json::json;
     use std::collections::VecDeque;
     use std::path::PathBuf;
@@ -787,6 +789,43 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[derive(Deserialize)]
+    struct EchoParams {
+        value: String,
+    }
+
+    struct EchoTool;
+
+    #[async_trait(?Send)]
+    impl Tool for EchoTool {
+        fn name(&self) -> &str {
+            "echo"
+        }
+
+        fn description(&self) -> &str {
+            "Echo a value"
+        }
+
+        fn parameters(&self) -> Value {
+            json!({
+                "type": "object",
+                "properties": {
+                    "value": { "type": "string" }
+                },
+                "required": ["value"]
+            })
+        }
+
+        async fn execute(&self, args: &Value, _ctx: &ToolContext) -> String {
+            let params: EchoParams = match parse_tool_args(args) {
+                Ok(params) => params,
+                Err(error) => return format!("Error: failed to parse tool arguments: {error}"),
+            };
+
+            format!("echo:{}", params.value)
+        }
     }
 
     #[test]
@@ -988,25 +1027,7 @@ mod tests {
             finish_reason: Some("stop".to_string()),
         }]);
 
-        fn echo_tool(_ctx: &crate::tooling::types::ToolContext, value: String) -> String {
-            format!("echo:{value}")
-        }
-
-        let tool_registry = ToolRegistryBuilder::new()
-            .register_fn(
-                "echo",
-                "Echo a value",
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "value": { "type": "string" }
-                    },
-                    "required": ["value"]
-                }),
-                ["value"],
-                echo_tool,
-            )
-            .build();
+        let tool_registry = ToolRegistryBuilder::new().register(EchoTool).build();
 
         let agent = Agent::with_definition_tool_registry_executor_llm_and_workspace(
             AgentDefinition::default(),
@@ -1035,10 +1056,6 @@ mod tests {
 
     #[tokio::test]
     async fn executes_function_tools_from_native_stringified_arguments() {
-        fn echo_tool(_ctx: &crate::tooling::types::ToolContext, value: String) -> String {
-            format!("echo:{value}")
-        }
-
         let home = temp_home("function-tool");
         let llm = RecordingLlm::new(vec![
             LlmResponse {
@@ -1064,21 +1081,7 @@ mod tests {
             },
         ]);
 
-        let tool_registry = ToolRegistryBuilder::new()
-            .register_fn(
-                "echo",
-                "Echo a value",
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "value": { "type": "string" }
-                    },
-                    "required": ["value"]
-                }),
-                ["value"],
-                echo_tool,
-            )
-            .build();
+        let tool_registry = ToolRegistryBuilder::new().register(EchoTool).build();
 
         let agent = Agent::with_definition_tool_registry_executor_llm_and_workspace(
             AgentDefinition::default(),
