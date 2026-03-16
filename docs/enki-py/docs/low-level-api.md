@@ -5,9 +5,9 @@ slug: /low-level-api
 
 # Low-Level API
 
-The generated binding is exported from `enki_py.enki_py` and re-exported at package level.
+Use the low-level API when you want direct control over the backend agent, tool schema, and tool execution callback.
 
-The UniFFI definition currently exposes:
+The package exposes:
 
 - `EnkiTool`
 - `EnkiToolHandler`
@@ -72,7 +72,7 @@ The handler receives:
 
 ## `EnkiAgent`
 
-Two constructors are available.
+The main constructors are:
 
 ### Plain constructor
 
@@ -109,4 +109,4 @@ result = await agent.run("session-custom-tools", "Use the available tools.")
 print(result)
 ```
 
-The higher-level wrapper documented in [Agent wrapper](/docs/agent-wrapper) is built on top of this API.
+Use [Getting Started Guide](/docs/agent-wrapper) instead if you want decorator-based tools and a simpler Python-first interface.

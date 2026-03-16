@@ -5,7 +5,19 @@ slug: /intro
 
 # enki-py
 
-`enki-py` is the Python binding for the Enki core crate in this repository.
+`enki-py` is a Python package for building agents on top of Enki.
+
+Install it from PyPI with `pip`:
+
+```bash
+pip install enki-py
+```
+
+Or add it to a project managed by `uv`:
+
+```bash
+uv add enki-py
+```
 
 It exposes two layers:
 
@@ -66,18 +78,10 @@ agent = enki_py.EnkiAgent(
 )
 ```
 
-## Package layout
-
-The current crate layout is:
-
-- `crates/bindings/enki-py/src`: Rust and UniFFI definitions
-- `crates/bindings/enki-py/python/enki_py/enki_py`: generated Python bindings and native library
-- `crates/bindings/enki-py/python/enki_py/agent.py`: Python-first wrapper API
-- `crates/bindings/enki-py/python/tests`: usage examples and tests
-
 ## In this documentation
 
 - [Installation](/docs/installation)
-- [Agent wrapper](/docs/agent-wrapper)
+- [Getting Started Guide](/docs/agent-wrapper)
 - [Low-level API](/docs/low-level-api)
 - [Examples](/docs/examples)
+- [FAQ](/docs/faq)
