@@ -6,7 +6,7 @@
 
 Async-first multi-agent framework built on Rust and Tokio.
 
-This repository contains the current `core-next` workspace for Enki's Rust runtime plus the `enki-py` Python bindings.
+This repository contains the current `core-next` workspace for Enki's Rust runtime plus the `enki-py` Python bindings and the `enki-js` WASM bindings.
 
 ## Docs
 
@@ -23,6 +23,7 @@ This repository contains the current `core-next` workspace for Enki's Rust runti
 |-- crates/
 |   |-- core/
 |   `-- bindings/
+|       |-- enki-js/
 |       `-- enki-py/
 |-- docs/
 `-- test/
@@ -31,6 +32,7 @@ This repository contains the current `core-next` workspace for Enki's Rust runti
 The workspace currently contains:
 
 - `crates/core`: Rust agent runtime, memory system, tool execution, LLM provider abstraction, and CLI entrypoint
+- `crates/bindings/enki-js`: `wasm-bindgen` JavaScript bindings for browser-safe, callback-driven agent execution
 - `crates/bindings/enki-py`: UniFFI-based Python bindings and higher-level Python package packaging
 - `docs/enki-py`: the docs site source used to publish `docs.getenki.com`
 
@@ -40,6 +42,7 @@ The workspace currently contains:
 - Built-in tools for `read_file`, `write_file`, and `exec`
 - Multi-provider LLM support via the `provider::model` format
 - Python bindings exposing `EnkiAgent`, `EnkiTool`, and `EnkiToolHandler`
+- JavaScript/WASM bindings exposing `EnkiJsAgent` with JS-provided LLM and tool callbacks
 
 Examples of supported model strings in the current codebase:
 
@@ -78,6 +81,14 @@ From `crates/bindings/enki-py`:
 ```powershell
 pip install maturin
 maturin develop
+```
+
+### JavaScript bindings
+
+From `crates/bindings/enki-js`:
+
+```powershell
+wasm-pack build --target bundler --out-dir pkg
 ```
 
 ### Docs site
@@ -120,6 +131,14 @@ The published docs describe two Python layers:
 - a higher-level Python wrapper for more ergonomic agent usage
 
 This repo contains the low-level Rust-backed binding implementation in `crates/bindings/enki-py`.
+
+## JavaScript API
+
+The WASM binding in `crates/bindings/enki-js` is browser-oriented:
+
+- session state is stored in memory
+- the LLM is supplied by an async JavaScript callback
+- tool execution is supplied by an optional async JavaScript callback
 
 ## Persistence
 
