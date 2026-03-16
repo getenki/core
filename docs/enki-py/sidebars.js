@@ -3,6 +3,8 @@ const sidebars = {
         "intro",
         "installation",
         "agent-wrapper",
+        "memory-backends",
+        "memory-examples",
         "low-level-api",
         "examples",
         "faq",
