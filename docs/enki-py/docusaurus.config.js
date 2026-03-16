@@ -1,7 +1,7 @@
 const config = {
   title: "enki-py",
   tagline: "Python bindings and agent wrapper for Enki",
-  favicon: "img/favicon.svg",
+  favicon: "img/favicon.png",
 
   url: "http://localhost",
   baseUrl: "/",
@@ -44,6 +44,11 @@ const config = {
     },
     navbar: {
       title: "enki-py",
+      logo: {
+        alt: "Enki logo",
+        src: "img/logo-light.png",
+        srcDark: "img/logo-dark.png"
+      },
       items: [
         {
           type: "docSidebar",
