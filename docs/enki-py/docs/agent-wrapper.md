@@ -48,6 +48,8 @@ Common constructor parameters:
 
 Use `MemoryBackend` as the extension point for custom memory. Implement the abstract methods, then pass `backend.as_memory_module()` to the agent.
 
+Custom memory methods may be either normal functions or `async def` coroutine functions. The wrapper accepts both styles.
+
 See:
 
 - [Memory Backends](/docs/memory-backends)

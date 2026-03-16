@@ -11,6 +11,8 @@ Use `MemoryBackend` when you want to plug custom memory into the high-level `Age
 
 `MemoryBackend` is the Python-side contract for agent memory. You implement the storage and retrieval behavior, then register it with `Agent` through `as_memory_module()`.
 
+Each backend method may be implemented either synchronously or as an `async def` coroutine method. The wrapper supports both forms.
+
 The class defines:
 
 - `record(session_id, user_msg, assistant_msg)`
@@ -18,6 +20,13 @@ The class defines:
 - `flush(session_id)`
 - `consolidate(session_id)`: optional
 - `as_memory_module()`
+
+Return expectations:
+
+- `record()` may return `None` or an awaitable that resolves to `None`
+- `recall()` may return `list[MemoryEntry]` or an awaitable that resolves to that list
+- `flush()` may return `None` or an awaitable that resolves to `None`
+- `consolidate()` may return `None` or an awaitable that resolves to `None`
 
 ## Minimal shape
 
@@ -28,10 +37,10 @@ from enki_py import MemoryBackend, MemoryEntry
 class MyMemory(MemoryBackend):
     name = "my_memory"
 
-    def record(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
+    async def record(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
         ...
 
-    def recall(
+    async def recall(
         self,
         session_id: str,
         query: str,
@@ -39,7 +48,7 @@ class MyMemory(MemoryBackend):
     ) -> list[MemoryEntry]:
         ...
 
-    def flush(self, session_id: str) -> None:
+    async def flush(self, session_id: str) -> None:
         ...
 ```
 
@@ -64,9 +73,11 @@ agent = Agent(
 Override `consolidate()` if your backend needs a compaction or summarization hook. If you do not need it, inherit the default no-op implementation.
 
 ```python
-def consolidate(self, session_id: str) -> None:
+async def consolidate(self, session_id: str) -> None:
     ...
 ```
+
+If you prefer, the same methods can also be plain synchronous `def` functions.
 
 ## Related types
 
