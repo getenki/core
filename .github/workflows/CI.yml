@@ -10,6 +10,7 @@ on:
     branches:
       - main
       - master
+      - devops-release
     tags:
       - '*'
   pull_request:
@@ -21,9 +22,12 @@ permissions:
 env:
   PYTHON_MANIFEST_PATH: crates/bindings/enki-py/Cargo.toml
   PYTHON_ARTIFACT_DIR: crates/bindings/enki-py/artifacts/dist
+  UNIFFI_BINDGEN_VERSION: 0.31.0
+  RELEASE_ARTIFACT_DIR: release-artifacts
 
 jobs:
   linux:
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -50,6 +54,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: --manifest-path ${{ env.PYTHON_MANIFEST_PATH }} --release --out ${{ env.PYTHON_ARTIFACT_DIR }} --find-interpreter
+          before-script-linux: pip install uniffi-bindgen==${{ env.UNIFFI_BINDGEN_VERSION }}
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           manylinux: auto
       - name: Upload wheels
@@ -59,6 +64,7 @@ jobs:
           path: ${{ env.PYTHON_ARTIFACT_DIR }}
 
   musllinux:
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -81,6 +87,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: --manifest-path ${{ env.PYTHON_MANIFEST_PATH }} --release --out ${{ env.PYTHON_ARTIFACT_DIR }} --find-interpreter
+          before-script-linux: pip install uniffi-bindgen==${{ env.UNIFFI_BINDGEN_VERSION }}
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           manylinux: musllinux_1_2
       - name: Upload wheels
@@ -90,6 +97,7 @@ jobs:
           path: ${{ env.PYTHON_ARTIFACT_DIR }}
 
   windows:
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -109,6 +117,8 @@ jobs:
         with:
           python-version: 3.13
           architecture: ${{ matrix.platform.python_arch }}
+      - name: Install uniffi-bindgen
+        run: python -m pip install uniffi-bindgen==${{ env.UNIFFI_BINDGEN_VERSION }}
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -122,6 +132,7 @@ jobs:
           path: ${{ env.PYTHON_ARTIFACT_DIR }}
 
   macos:
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -135,6 +146,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: 3.x
+      - name: Install uniffi-bindgen
+        run: python -m pip install uniffi-bindgen==${{ env.UNIFFI_BINDGEN_VERSION }}
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -151,6 +164,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.x
+      - name: Install uniffi-bindgen
+        run: python -m pip install uniffi-bindgen==${{ env.UNIFFI_BINDGEN_VERSION }}
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
@@ -166,26 +184,27 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
-    needs: [linux, musllinux, windows, macos, sdist]
+    needs: [ linux, musllinux, windows, macos, sdist ]
+    environment:
+      name: pypi
+      url: https://pypi.org/p/enki-py/
     permissions:
       # Use to sign the release artifacts
       id-token: write
-      # Used to upload release artifacts
-      contents: write
       # Used to generate artifact attestation
       attestations: write
     steps:
       - uses: actions/download-artifact@v7
+        with:
+          path: ${{ env.RELEASE_ARTIFACT_DIR }}
+          merge-multiple: true
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v3
         with:
-          subject-path: 'wheels-*/*'
-      - name: Install uv
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        uses: astral-sh/setup-uv@v7
+          subject-path: '${{ env.RELEASE_ARTIFACT_DIR }}/*'
       - name: Publish to PyPI
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        run: uv publish 'wheels-*/*'
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}  # create this secret with a token from https://pypi.org/manage/account/token/
+          packages-dir: ${{ env.RELEASE_ARTIFACT_DIR }}
 
