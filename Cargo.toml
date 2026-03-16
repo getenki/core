@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/bindings/enki-py", "crates/core"]
+members = ["crates/bindings/enki-js", "crates/bindings/enki-py", "crates/core"]
 resolver = "3"
 
 [workspace.package]
