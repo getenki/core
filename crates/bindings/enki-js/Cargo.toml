@@ -12,10 +12,13 @@ crate-type = ["cdylib", "rlib"]
 default = []
 
 [dependencies]
+futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+async-trait.workspace = true
+core_next = { package = "core", path = "../../core" }
 js-sys = "0.3.82"
 serde-wasm-bindgen = "0.6.5"
 wasm-bindgen = "0.2.105"

@@ -1,10 +1,45 @@
-use js_sys::{Function, Promise, Reflect};
+use async_trait::async_trait;
+use core_next::agent::{Agent, AgentDefinition};
+use core_next::llm::{
+    ChatMessage, LlmConfig, LlmProvider, LlmResponse, MessageRole, ResponseStream, ToolDefinition,
+};
+use core_next::memory::{MemoryManager, MemoryRouter, MemoryStrategy};
+use core_next::tooling::tool_calling::RegistryToolExecutor;
+use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
+use futures::stream;
+use js_sys::{Function, Promise};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
+
+thread_local! {
+    static CALLBACKS: RefCell<CallbackRegistry> = RefCell::new(CallbackRegistry::default());
+}
+
+#[derive(Default)]
+struct CallbackRegistry {
+    next_id: u32,
+    functions: HashMap<u32, Function>,
+}
+
+impl CallbackRegistry {
+    fn insert(&mut self, function: Function) -> u32 {
+        self.next_id = self.next_id.saturating_add(1).max(1);
+        self.functions.insert(self.next_id, function);
+        self.next_id
+    }
+
+    fn get(&self, callback_id: u32) -> Option<Function> {
+        self.functions.get(&callback_id).cloned()
+    }
+
+    fn remove(&mut self, callback_id: u32) {
+        self.functions.remove(&callback_id);
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EnkiJsTool {
@@ -14,10 +49,11 @@ pub struct EnkiJsTool {
     pub parameters_json: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug)]
 struct AgentOptions {
     name: String,
     system_prompt_preamble: String,
+    model: String,
     max_iterations: u32,
 }
 
@@ -26,61 +62,219 @@ impl Default for AgentOptions {
         Self {
             name: "Personal Assistant".to_string(),
             system_prompt_preamble: "You are a helpful Personal Assistant agent.".to_string(),
+            model: "js::callback".to_string(),
             max_iterations: 20,
         }
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct SessionMessage {
+#[derive(Serialize)]
+struct JsLlmRequest {
+    agent: JsAgentMetadata,
+    messages: Vec<JsChatMessage>,
+    tools: Vec<JsToolDefinition>,
+}
+
+#[derive(Serialize)]
+struct JsAgentMetadata {
+    name: String,
+    system_prompt_preamble: String,
+    model: String,
+    max_iterations: u32,
+}
+
+#[derive(Serialize)]
+struct JsChatMessage {
     role: String,
     content: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    tool_calls: Option<Vec<Value>>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct LlmRequest {
-    agent: AgentOptions,
-    messages: Vec<SessionMessage>,
-    tools: Vec<ToolDefinition>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct ToolDefinition {
+#[derive(Serialize)]
+struct JsToolDefinition {
     name: String,
-    description: String,
+    description: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct LlmResponse {
+#[derive(Deserialize)]
+struct JsLlmResponse {
     content: String,
     #[serde(default)]
     tool_calls: Vec<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct ToolCallFunction {
-    name: String,
-    arguments: Value,
+#[derive(Default)]
+struct NoopMemoryRouter;
+
+#[async_trait(?Send)]
+impl MemoryRouter for NoopMemoryRouter {
+    async fn select(&self, _user_message: &str) -> MemoryStrategy {
+        MemoryStrategy {
+            active_providers: Vec::new(),
+            max_context_entries: 0,
+        }
+    }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct ToolCall {
-    #[serde(default)]
-    id: Option<String>,
-    function: ToolCallFunction,
+struct JsLlmProvider {
+    callback_id: u32,
+    options: AgentOptions,
+}
+
+#[async_trait(?Send)]
+impl LlmProvider for JsLlmProvider {
+    async fn complete(
+        &self,
+        messages: &[ChatMessage],
+        _config: &LlmConfig,
+    ) -> core_next::llm::Result<LlmResponse> {
+        self.invoke(messages, &[]).await
+    }
+
+    async fn complete_stream(
+        &self,
+        _messages: &[ChatMessage],
+        _config: &LlmConfig,
+    ) -> core_next::llm::Result<ResponseStream> {
+        Ok(Box::pin(stream::empty()))
+    }
+
+    async fn complete_with_tools(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolDefinition],
+        _config: &LlmConfig,
+    ) -> core_next::llm::Result<LlmResponse> {
+        self.invoke(messages, tools).await
+    }
+
+    fn name(&self) -> &'static str {
+        "javascript"
+    }
+
+    fn available_models(&self) -> Vec<&'static str> {
+        vec!["js::callback"]
+    }
+}
+
+impl JsLlmProvider {
+    async fn invoke(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolDefinition],
+    ) -> core_next::llm::Result<LlmResponse> {
+        let payload = JsLlmRequest {
+            agent: JsAgentMetadata {
+                name: self.options.name.clone(),
+                system_prompt_preamble: self.options.system_prompt_preamble.clone(),
+                model: self.options.model.clone(),
+                max_iterations: self.options.max_iterations,
+            },
+            messages: messages
+                .iter()
+                .map(|message| JsChatMessage {
+                    role: message_role_name(message.role).to_string(),
+                    content: message.content.clone(),
+                    tool_call_id: message.tool_call_id.clone(),
+                })
+                .collect(),
+            tools: tools
+                .iter()
+                .map(|tool| JsToolDefinition {
+                    name: tool.name.clone(),
+                    description: tool.description.clone(),
+                })
+                .collect(),
+        };
+
+        let payload = serde_wasm_bindgen::to_value(&payload)
+            .map_err(|error| core_next::llm::LlmError::Provider(error.to_string()))?;
+        let result = invoke_callback(self.callback_id, &payload)
+            .await
+            .map_err(|error| core_next::llm::LlmError::Provider(js_error_message(&error)))?;
+
+        if let Some(content) = result.as_string() {
+            return Ok(LlmResponse {
+                content,
+                usage: None,
+                tool_calls: Vec::new(),
+                model: self.options.model.clone(),
+                finish_reason: Some("stop".to_string()),
+            });
+        }
+
+        let response: JsLlmResponse = serde_wasm_bindgen::from_value(result)
+            .map_err(|error| core_next::llm::LlmError::Provider(error.to_string()))?;
+
+        Ok(LlmResponse {
+            content: response.content,
+            usage: None,
+            tool_calls: response
+                .tool_calls
+                .into_iter()
+                .map(|tool_call| tool_call.to_string())
+                .collect(),
+            model: self.options.model.clone(),
+            finish_reason: Some("stop".to_string()),
+        })
+    }
+}
+
+struct JsTool {
+    name: String,
+    description: String,
+    parameters: Value,
+    callback_id: Option<u32>,
+}
+
+#[async_trait(?Send)]
+impl Tool for JsTool {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn parameters(&self) -> Value {
+        self.parameters.clone()
+    }
+
+    async fn execute(&self, args: &Value, ctx: &ToolContext) -> String {
+        let Some(callback_id) = self.callback_id else {
+            return format!("Error: tool handler not configured for `{}`", self.name);
+        };
+
+        let payload = serde_wasm_bindgen::to_value(&serde_json::json!({
+            "tool": self.name,
+            "args": args,
+            "context": {
+                "agent_dir": ctx.agent_dir.to_string_lossy(),
+                "workspace_dir": ctx.workspace_dir.to_string_lossy(),
+                "sessions_dir": ctx.sessions_dir.to_string_lossy(),
+            }
+        }));
+
+        let Ok(payload) = payload else {
+            return "Error: failed to serialize tool request.".to_string();
+        };
+
+        match invoke_callback(callback_id, &payload).await {
+            Ok(result) => result.as_string().unwrap_or_else(|| js_error_message(&result)),
+            Err(error) => format!("Error: {}", js_error_message(&error)),
+        }
+    }
 }
 
 #[wasm_bindgen]
 pub struct EnkiJsAgent {
     options: AgentOptions,
-    llm_handler: Function,
-    tool_handler: Option<Function>,
+    llm_callback_id: u32,
+    tool_callback_id: Option<u32>,
     tools: Vec<EnkiJsTool>,
-    sessions: RefCell<HashMap<String, Vec<SessionMessage>>>,
+    agent: RefCell<Option<Agent>>,
 }
 
 #[wasm_bindgen]
@@ -89,6 +283,7 @@ impl EnkiJsAgent {
     pub fn new(
         name: Option<String>,
         system_prompt_preamble: Option<String>,
+        model: Option<String>,
         max_iterations: Option<u32>,
         llm_handler: Function,
         tool_handler: Option<Function>,
@@ -101,89 +296,48 @@ impl EnkiJsAgent {
         if let Some(system_prompt_preamble) = system_prompt_preamble {
             options.system_prompt_preamble = system_prompt_preamble;
         }
+        if let Some(model) = model {
+            options.model = model;
+        }
         if let Some(max_iterations) = max_iterations {
             options.max_iterations = max_iterations.max(1);
         }
 
-        let tools = if tools.is_undefined() || tools.is_null() {
+        let tools = if tools.is_null() || tools.is_undefined() {
             Vec::new()
         } else {
             serde_wasm_bindgen::from_value::<Vec<EnkiJsTool>>(tools)
                 .map_err(|error| JsValue::from_str(&format!("Invalid tools array: {error}")))?
         };
 
+        let llm_callback_id = CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(llm_handler));
+        let tool_callback_id =
+            tool_handler.map(|function| CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(function)));
+
         Ok(Self {
             options,
-            llm_handler,
-            tool_handler,
+            llm_callback_id,
+            tool_callback_id,
             tools,
-            sessions: RefCell::new(HashMap::new()),
+            agent: RefCell::new(None),
         })
     }
 
     #[wasm_bindgen(js_name = run)]
     pub async fn run(&self, session_id: String, user_message: String) -> Result<String, JsValue> {
-        let mut messages = {
-            let mut sessions = self.sessions.borrow_mut();
-            let session = sessions.entry(session_id.clone()).or_insert_with(|| {
-                vec![SessionMessage {
-                    role: "system".to_string(),
-                    content: self.system_prompt(),
-                    tool_call_id: None,
-                    tool_calls: None,
-                }]
-            });
-            session.clone()
-        };
-
-        messages.push(SessionMessage {
-            role: "user".to_string(),
-            content: user_message,
-            tool_call_id: None,
-            tool_calls: None,
-        });
-
-        for _ in 0..self.options.max_iterations {
-            let response = self.call_llm(&messages).await?;
-            let invocations = extract_tool_invocations(&response);
-
-            messages.push(SessionMessage {
-                role: "assistant".to_string(),
-                content: response.content.clone(),
-                tool_call_id: None,
-                tool_calls: (!response.tool_calls.is_empty()).then_some(response.tool_calls.clone()),
-            });
-
-            if invocations.is_empty() {
-                self.sessions.borrow_mut().insert(session_id, messages);
-                return Ok(response.content);
-            }
-
-            for invocation in invocations {
-                let tool_result = self.execute_tool(&session_id, &invocation).await?;
-                messages.push(SessionMessage {
-                    role: "tool".to_string(),
-                    content: tool_result,
-                    tool_call_id: invocation.id,
-                    tool_calls: None,
-                });
-            }
+        if self.agent.borrow().is_none() {
+            let agent = self.build_agent().await?;
+            self.agent.borrow_mut().replace(agent);
         }
 
-        let content = "Max iterations reached.".to_string();
-        messages.push(SessionMessage {
-            role: "assistant".to_string(),
-            content: content.clone(),
-            tool_call_id: None,
-            tool_calls: None,
-        });
-        self.sessions.borrow_mut().insert(session_id, messages);
-        Ok(content)
-    }
-
-    #[wasm_bindgen(js_name = resetSession)]
-    pub fn reset_session(&self, session_id: String) {
-        self.sessions.borrow_mut().remove(&session_id);
+        let agent = self
+            .agent
+            .borrow_mut()
+            .take()
+            .expect("agent initialized");
+        let response = agent.run(&session_id, &user_message).await;
+        self.agent.borrow_mut().replace(agent);
+        Ok(response)
     }
 
     #[wasm_bindgen(js_name = toolCatalogJson)]
@@ -194,7 +348,7 @@ impl EnkiJsAgent {
             .map(|tool| {
                 (
                     tool.name.clone(),
-                    json!({
+                    serde_json::json!({
                         "description": tool.description,
                         "parameters_json": tool.parameters_json,
                     }),
@@ -207,250 +361,97 @@ impl EnkiJsAgent {
 }
 
 impl EnkiJsAgent {
-    fn system_prompt(&self) -> String {
-        format!(
-            "You are {}.\n{} Use tools via JSON calls when needed.\nAvailable tools: {}",
-            self.options.name,
-            self.options.system_prompt_preamble,
-            self.tools
-                .iter()
-                .map(|tool| format!("{} ({})", tool.name, tool.description))
-                .collect::<Vec<_>>()
-                .join(", ")
+    async fn build_agent(&self) -> Result<Agent, JsValue> {
+        let tool_registry = self.build_tool_registry()?;
+        let llm = JsLlmProvider {
+            callback_id: self.llm_callback_id,
+            options: self.options.clone(),
+        };
+        let memory = MemoryManager::new(Box::new(NoopMemoryRouter), Vec::new());
+
+        Agent::with_definition_tool_registry_executor_llm_and_workspace(
+            AgentDefinition {
+                name: self.options.name.clone(),
+                system_prompt_preamble: self.options.system_prompt_preamble.clone(),
+                model: self.options.model.clone(),
+                max_iterations: self.options.max_iterations as usize,
+            },
+            tool_registry,
+            Box::new(RegistryToolExecutor),
+            Some(Box::new(llm)),
+            Some(memory),
+            None,
         )
+        .await
+        .map_err(|error| JsValue::from_str(&error))
     }
 
-    async fn call_llm(&self, messages: &[SessionMessage]) -> Result<LlmResponse, JsValue> {
-        let request = LlmRequest {
-            agent: self.options.clone(),
-            messages: messages.to_vec(),
-            tools: self
-                .tools
-                .iter()
-                .map(|tool| ToolDefinition {
+    fn build_tool_registry(&self) -> Result<ToolRegistry, JsValue> {
+        let mut registry = ToolRegistry::new();
+
+        for tool in &self.tools {
+            let parameters = if tool.parameters_json.trim().is_empty() {
+                Value::Null
+            } else {
+                serde_json::from_str::<Value>(&tool.parameters_json).map_err(|error| {
+                    JsValue::from_str(&format!(
+                        "Invalid parameters_json for tool `{}`: {error}",
+                        tool.name
+                    ))
+                })?
+            };
+
+            registry.insert(
+                tool.name.clone(),
+                Box::new(JsTool {
                     name: tool.name.clone(),
                     description: tool.description.clone(),
-                })
-                .collect(),
-        };
-
-        let request = serde_wasm_bindgen::to_value(&request)
-            .map_err(|error| JsValue::from_str(&format!("Failed to serialize LLM request: {error}")))?;
-        let output = invoke_async(&self.llm_handler, &request).await?;
-
-        if let Some(text) = output.as_string() {
-            return Ok(LlmResponse {
-                content: text,
-                tool_calls: Vec::new(),
-            });
+                    parameters,
+                    callback_id: self.tool_callback_id,
+                }),
+            );
         }
 
-        serde_wasm_bindgen::from_value(output)
-            .map_err(|error| JsValue::from_str(&format!("Invalid LLM response: {error}")))
-    }
-
-    async fn execute_tool(
-        &self,
-        session_id: &str,
-        invocation: &ToolCall,
-    ) -> Result<String, JsValue> {
-        let Some(tool_handler) = &self.tool_handler else {
-            return Ok(format!(
-                "Error: tool handler not configured for tool `{}`",
-                invocation.function.name
-            ));
-        };
-
-        let payload = serde_wasm_bindgen::to_value(&json!({
-            "session_id": session_id,
-            "tool": invocation.function.name,
-            "args": invocation.function.arguments,
-        }))
-        .map_err(|error| JsValue::from_str(&format!("Failed to serialize tool request: {error}")))?;
-
-        let output = invoke_async(tool_handler, &payload).await?;
-        Ok(output
-            .as_string()
-            .unwrap_or_else(|| js_value_to_string(&output)))
+        Ok(registry)
     }
 }
 
-async fn invoke_async(function: &Function, payload: &JsValue) -> Result<JsValue, JsValue> {
-    let value = function.call1(&JsValue::NULL, payload)?;
+impl Drop for EnkiJsAgent {
+    fn drop(&mut self) {
+        CALLBACKS.with(|callbacks| {
+            let mut callbacks = callbacks.borrow_mut();
+            callbacks.remove(self.llm_callback_id);
+            if let Some(tool_callback_id) = self.tool_callback_id {
+                callbacks.remove(tool_callback_id);
+            }
+        });
+    }
+}
 
-    if value.is_instance_of::<Promise>() {
-        JsFuture::from(Promise::from(value)).await
+async fn invoke_callback(callback_id: u32, payload: &JsValue) -> Result<JsValue, JsValue> {
+    let Some(function) = CALLBACKS.with(|callbacks| callbacks.borrow().get(callback_id)) else {
+        return Err(JsValue::from_str("Callback is no longer registered."));
+    };
+
+    let result = function.call1(&JsValue::NULL, payload)?;
+    if result.is_instance_of::<Promise>() {
+        JsFuture::from(Promise::from(result)).await
     } else {
-        Ok(value)
+        Ok(result)
     }
 }
 
-fn extract_tool_invocations(response: &LlmResponse) -> Vec<ToolCall> {
-    if !response.tool_calls.is_empty() {
-        return response
-            .tool_calls
-            .iter()
-            .filter_map(|value| serde_json::from_value::<ToolCall>(value.clone()).ok())
-            .collect();
+fn message_role_name(role: MessageRole) -> &'static str {
+    match role {
+        MessageRole::System => "system",
+        MessageRole::User => "user",
+        MessageRole::Assistant => "assistant",
+        MessageRole::Tool => "tool",
     }
-
-    extract_embedded_tool_call(&response.content)
-        .map(|(name, arguments)| {
-            vec![ToolCall {
-                id: None,
-                function: ToolCallFunction { name, arguments },
-            }]
-        })
-        .unwrap_or_default()
 }
 
-fn extract_embedded_tool_call(content: &str) -> Option<(String, Value)> {
-    if let Some(result) = parse_tool_call_value(content) {
-        return Some(result);
-    }
-
-    for block in extract_fenced_code_blocks(content) {
-        if let Some(result) = parse_tool_call_value(block) {
-            return Some(result);
-        }
-        for candidate in json_object_candidates(block) {
-            if let Some(result) = parse_tool_call_value(candidate) {
-                return Some(result);
-            }
-        }
-    }
-
-    for candidate in json_object_candidates(content) {
-        if let Some(result) = parse_tool_call_value(candidate) {
-            return Some(result);
-        }
-    }
-
-    None
-}
-
-fn extract_fenced_code_blocks(content: &str) -> Vec<&str> {
-    let mut blocks = Vec::new();
-    let mut remaining = content;
-
-    while let Some(fence_start) = remaining.find("```") {
-        let after_fence = &remaining[fence_start + 3..];
-        let body_start = after_fence.find('\n').map(|index| index + 1).unwrap_or(0);
-        let body = &after_fence[body_start..];
-
-        if let Some(fence_end) = body.find("```") {
-            let block = body[..fence_end].trim();
-            if !block.is_empty() {
-                blocks.push(block);
-            }
-            remaining = &body[fence_end + 3..];
-        } else {
-            break;
-        }
-    }
-
-    blocks
-}
-
-fn parse_tool_call_value(raw: &str) -> Option<(String, Value)> {
-    if let Some(result) = try_parse_tool_call(raw) {
-        return Some(result);
-    }
-
-    let mut repaired = raw.to_string();
-    for _ in 0..3 {
-        repaired.push('}');
-        if let Some(result) = try_parse_tool_call(&repaired) {
-            return Some(result);
-        }
-    }
-
-    None
-}
-
-fn try_parse_tool_call(raw: &str) -> Option<(String, Value)> {
-    let parsed: Value = serde_json::from_str(raw).ok()?;
-    let tool_name = parsed.get("tool")?.as_str()?.to_string();
-    let args = parsed.get("args").cloned().unwrap_or(Value::Null);
-    Some((tool_name, args))
-}
-
-fn json_object_candidates(content: &str) -> Vec<&str> {
-    let mut candidates = Vec::new();
-    let mut start = None;
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-
-    for (index, ch) in content.char_indices() {
-        if in_string {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-
-            match ch {
-                '\\' => escaped = true,
-                '"' => in_string = false,
-                _ => {}
-            }
-
-            continue;
-        }
-
-        match ch {
-            '"' => in_string = true,
-            '{' => {
-                if depth == 0 {
-                    start = Some(index);
-                }
-                depth += 1;
-            }
-            '}' => {
-                if depth == 0 {
-                    continue;
-                }
-
-                depth -= 1;
-                if depth == 0 {
-                    if let Some(start_index) = start.take() {
-                        candidates.push(&content[start_index..=index]);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if depth > 0 {
-        if let Some(start_index) = start {
-            candidates.push(&content[start_index..]);
-        }
-    }
-
-    candidates
-}
-
-fn js_value_to_string(value: &JsValue) -> String {
-    if let Some(text) = value.as_string() {
-        return text;
-    }
-
-    if let Ok(stringified) = js_sys::JSON::stringify(value) {
-        if let Some(text) = stringified.as_string() {
-            return text;
-        }
-    }
-
-    if let Ok(to_string) = Reflect::get(value, &JsValue::from_str("toString")) {
-        if let Some(function) = to_string.dyn_ref::<Function>() {
-            if let Ok(result) = function.call0(value) {
-                if let Some(text) = result.as_string() {
-                    return text;
-                }
-            }
-        }
-    }
-
-    "[object Object]".to_string()
+fn js_error_message(value: &JsValue) -> String {
+    value
+        .as_string()
+        .unwrap_or_else(|| js_sys::JSON::stringify(value).ok().and_then(|v| v.as_string()).unwrap_or_else(|| "JavaScript error".to_string()))
 }

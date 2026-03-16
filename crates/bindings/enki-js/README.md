@@ -5,11 +5,12 @@ Browser-oriented JavaScript bindings for Enki built with `wasm-bindgen`.
 ## What it exposes
 
 - `EnkiJsTool`: tool metadata registered from JavaScript
-- `EnkiJsAgent`: in-memory agent loop backed by JavaScript callbacks for LLM requests and tool execution
+- `EnkiJsAgent`: a `core_next::agent::Agent` running inside WASM with JavaScript callbacks for LLM requests and tool execution
 
 The current WASM binding is intentionally browser-safe:
 
-- session state is kept in memory
+- the agent loop uses `crates/core` as the runtime
+- session state is kept in memory by the core agent on `wasm32`
 - filesystem-backed persistence is not used
 - tools execute through a JavaScript callback instead of native process execution
 
@@ -31,6 +32,7 @@ await init();
 const agent = new EnkiJsAgent(
   "Example Agent",
   "Use the echo tool before answering.",
+  "js::demo",
   4,
   async ({ messages }) => {
     const last = messages[messages.length - 1];
@@ -91,6 +93,7 @@ The constructor accepts an async JavaScript function that receives:
   "agent": {
     "name": "Personal Assistant",
     "system_prompt_preamble": "...",
+    "model": "js::callback",
     "max_iterations": 20
   },
   "messages": [
