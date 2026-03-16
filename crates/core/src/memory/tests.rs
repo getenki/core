@@ -7,15 +7,15 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[test]
-fn router_selects_entity_for_recall_query() {
+#[tokio::test]
+async fn router_selects_entity_for_recall_query() {
     let router = DefaultMemoryRouter::new(vec![
         "sliding_window".to_string(),
         "summary".to_string(),
         "structured".to_string(),
     ]);
 
-    let strategy = router.select("what's my name?");
+    let strategy = router.select("what's my name?").await;
 
     assert_eq!(
         strategy.active_providers,
@@ -23,15 +23,15 @@ fn router_selects_entity_for_recall_query() {
     );
 }
 
-#[test]
-fn router_selects_window_for_followup() {
+#[tokio::test]
+async fn router_selects_window_for_followup() {
     let router = DefaultMemoryRouter::new(vec![
         "sliding_window".to_string(),
         "summary".to_string(),
         "structured".to_string(),
     ]);
 
-    let strategy = router.select("ok do it");
+    let strategy = router.select("ok do it").await;
 
     assert_eq!(
         strategy.active_providers,
@@ -151,8 +151,9 @@ async fn record_fans_out_to_all() {
 
 struct FixedRouter;
 
+#[async_trait(?Send)]
 impl MemoryRouter for FixedRouter {
-    fn select(&self, _user_message: &str) -> crate::memory::MemoryStrategy {
+    async fn select(&self, _user_message: &str) -> crate::memory::MemoryStrategy {
         crate::memory::MemoryStrategy {
             active_providers: vec!["structured".to_string(), "summary".to_string()],
             max_context_entries: 4,

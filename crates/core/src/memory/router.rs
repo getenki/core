@@ -1,4 +1,5 @@
 use crate::memory::{MemoryRouter, MemoryStrategy};
+use async_trait::async_trait;
 
 pub struct DefaultMemoryRouter {
     provider_names: Vec<String>,
@@ -63,8 +64,9 @@ impl DefaultMemoryRouter {
     }
 }
 
+#[async_trait(?Send)]
 impl MemoryRouter for DefaultMemoryRouter {
-    fn select(&self, user_message: &str) -> MemoryStrategy {
+    async fn select(&self, user_message: &str) -> MemoryStrategy {
         let normalized = user_message.trim().to_ascii_lowercase();
         let active_providers = if Self::is_summary_query(&normalized) {
             self.pick(&["summary"])

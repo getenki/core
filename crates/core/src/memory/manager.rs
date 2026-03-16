@@ -39,7 +39,7 @@ impl MemoryManager {
         session_id: &str,
         user_message: &str,
     ) -> Result<String, String> {
-        let strategy = self.router.select(user_message);
+        let strategy = self.router.select(user_message).await;
         if strategy.active_providers.is_empty() || strategy.max_context_entries == 0 {
             return Ok(String::new());
         }
