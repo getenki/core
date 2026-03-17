@@ -1,22 +1,17 @@
 mod workspace;
 
 use crate::agent::workspace::AgentWorkspace;
-use crate::tooling::builtin_tools;
 use crate::llm::{
     ChatMessage, LlmConfig, LlmProvider, MessageRole, ToolDefinition, UniversalLLMClient,
 };
 use crate::memory::MemoryManager;
-use crate::message::message::{Message, next_request_id};
-#[cfg(not(target_arch = "wasm32"))]
 use crate::message::message::IndexedValue;
+use crate::message::message::{next_request_id, Message};
+use crate::tooling::builtin_tools;
 use crate::tooling::tool_calling::{RegistryToolExecutor, ToolCallRegistry, ToolExecutor};
 use crate::tooling::types::{ToolContext, ToolRegistry};
 use serde_json::Value;
-#[cfg(target_arch = "wasm32")]
-use std::collections::HashMap;
 use std::path::PathBuf;
-#[cfg(target_arch = "wasm32")]
-use tokio::sync::Mutex;
 
 // Config
 const DEFAULT_MAX_ITERATIONS: usize = 20;
@@ -569,9 +564,8 @@ Current task workspace: {}
                         .get("function")
                         .and_then(|function| function.get("arguments"))
                         .map(|arguments| match arguments {
-                            Value::String(raw) => {
-                                serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.clone()))
-                            }
+                            Value::String(raw) => serde_json::from_str(raw)
+                                .unwrap_or_else(|_| Value::String(raw.clone())),
                             _ => arguments.clone(),
                         })
                         .unwrap_or(Value::Null),
@@ -742,12 +736,12 @@ mod tests {
         ChatMessage, LlmConfig, LlmError, LlmProvider, LlmResponse, Result as LlmResult,
         ToolDefinition,
     };
-    use crate::tooling::types::{Tool, ToolContext, ToolRegistryBuilder, parse_tool_args};
+    use crate::tooling::types::{parse_tool_args, Tool, ToolContext, ToolRegistryBuilder};
     use async_trait::async_trait;
     use futures::stream;
     use serde::Deserialize;
-    use serde_json::Value;
     use serde_json::json;
+    use serde_json::Value;
     use std::collections::VecDeque;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -1102,14 +1096,16 @@ mod tests {
             LlmResponse {
                 content: String::new(),
                 usage: None,
-                tool_calls: vec![json!({
-                    "id": "call-1",
-                    "function": {
-                        "name": "echo",
-                        "arguments": "{\"value\":\"hello\"}"
-                    }
-                })
-                .to_string()],
+                tool_calls: vec![
+                    json!({
+                        "id": "call-1",
+                        "function": {
+                            "name": "echo",
+                            "arguments": "{\"value\":\"hello\"}"
+                        }
+                    })
+                    .to_string(),
+                ],
                 model: "recording".to_string(),
                 finish_reason: Some("tool_calls".to_string()),
             },

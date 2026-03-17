@@ -1,14 +1,9 @@
-use crate::tooling::types::{
-    Tool, ToolContext, ToolRegistry, ToolRegistryBuilder,
-};
-#[cfg(not(target_arch = "wasm32"))]
 use crate::tooling::types::parse_tool_args;
+use crate::tooling::types::{Tool, ToolContext, ToolRegistry, ToolRegistryBuilder};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
-#[cfg(not(target_arch = "wasm32"))]
 use tokio::fs;
-#[cfg(not(target_arch = "wasm32"))]
 use tokio::process::Command;
 
 #[derive(Deserialize)]
@@ -39,21 +34,12 @@ impl Tool for ReadFileTool {
     }
 
     async fn execute(&self, args: &Value, ctx: &ToolContext) -> String {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = (args, ctx);
-            return "Error: read_file is unavailable on wasm32.".to_string();
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
         let params: ReadFileParams = match parse_tool_args(args) {
             Ok(params) => params,
             Err(error) => return format!("Error: failed to parse tool arguments: {error}"),
         };
 
-        #[cfg(not(target_arch = "wasm32"))]
         let resolved = ctx.workspace_dir.join(params.path);
-        #[cfg(not(target_arch = "wasm32"))]
         fs::read_to_string(&resolved)
             .await
             .unwrap_or_else(|_| "File not found.".to_string())
@@ -90,26 +76,14 @@ impl Tool for WriteFileTool {
     }
 
     async fn execute(&self, args: &Value, ctx: &ToolContext) -> String {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = (args, ctx);
-            return "Error: write_file is unavailable on wasm32.".to_string();
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
         let params: WriteFileParams = match parse_tool_args(args) {
             Ok(params) => params,
             Err(error) => return format!("Error: failed to parse tool arguments: {error}"),
         };
-
-        #[cfg(not(target_arch = "wasm32"))]
         let resolved = ctx.workspace_dir.join(params.path);
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(parent) = resolved.parent() {
             let _ = fs::create_dir_all(parent).await;
         }
-
-        #[cfg(not(target_arch = "wasm32"))]
         match fs::write(&resolved, params.content).await {
             Ok(_) => "File written.".to_string(),
             Err(error) => format!("Error: {error}"),
@@ -145,26 +119,16 @@ impl Tool for ExecTool {
     }
 
     async fn execute(&self, args: &Value, ctx: &ToolContext) -> String {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = (args, ctx);
-            return "Error: exec is unavailable on wasm32.".to_string();
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
         let params: ExecParams = match parse_tool_args(args) {
             Ok(params) => params,
             Err(error) => return format!("Error: failed to parse tool arguments: {error}"),
         };
 
-        #[cfg(not(target_arch = "wasm32"))]
         #[cfg(windows)]
         let (shell, flag) = ("cmd", "/C");
-        #[cfg(not(target_arch = "wasm32"))]
         #[cfg(not(windows))]
         let (shell, flag) = ("sh", "-c");
 
-        #[cfg(not(target_arch = "wasm32"))]
         match Command::new(shell)
             .arg(flag)
             .arg(params.cmd)
@@ -185,12 +149,6 @@ impl Tool for ExecTool {
 }
 
 pub fn default_registry() -> ToolRegistry {
-    #[cfg(target_arch = "wasm32")]
-    {
-        return ToolRegistryBuilder::new().build();
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     ToolRegistryBuilder::new()
         .register(ReadFileTool)
         .register(WriteFileTool)

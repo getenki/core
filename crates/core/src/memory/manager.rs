@@ -1,6 +1,4 @@
-use crate::memory::{
-    DefaultMemoryRouter, MemoryEntry, MemoryKind, MemoryProvider, MemoryRouter,
-};
+use crate::memory::{DefaultMemoryRouter, MemoryEntry, MemoryKind, MemoryProvider, MemoryRouter};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::memory::{SlidingWindowMemory, StructuredMemory, SummaryMemory};
 use tokio::sync::Mutex;
@@ -19,29 +17,16 @@ impl MemoryManager {
     }
 
     pub fn with_defaults(memory_dir: impl Into<std::path::PathBuf>) -> Self {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = memory_dir.into();
-            return Self::new(
-                Box::new(DefaultMemoryRouter::new(Vec::new())),
-                Vec::new(),
-            );
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
         let memory_dir = memory_dir.into();
-        #[cfg(not(target_arch = "wasm32"))]
         let providers: Vec<Box<dyn MemoryProvider>> = vec![
             Box::new(SlidingWindowMemory::new(&memory_dir, 10)),
             Box::new(SummaryMemory::new(&memory_dir, 4, None)),
             Box::new(StructuredMemory::new(&memory_dir)),
         ];
-        #[cfg(not(target_arch = "wasm32"))]
         let provider_names = providers
             .iter()
             .map(|provider| provider.name().to_string())
             .collect();
-        #[cfg(not(target_arch = "wasm32"))]
         Self::new(
             Box::new(DefaultMemoryRouter::new(provider_names)),
             providers,
