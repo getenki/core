@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use core_next::agent::{Agent, AgentDefinition};
+use core_next::llm::{ChatMessage, LlmConfig, LlmProvider, LlmResponse, ResponseStream, ToolDefinition};
 use core_next::memory::{MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy};
 use core_next::tooling::tool_calling::RegistryToolExecutor;
 use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
+use futures::stream;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
@@ -70,6 +72,15 @@ pub trait EnkiMemoryHandler: Send + Sync {
     fn consolidate(&self, memory_name: String, session_id: String);
 }
 
+pub trait EnkiLlmHandler: Send + Sync {
+    fn complete(
+        &self,
+        model: String,
+        messages_json: String,
+        tools_json: String,
+    ) -> String;
+}
+
 struct PythonTool {
     name: String,
     description: String,
@@ -84,6 +95,11 @@ struct PythonMemoryProvider {
 
 struct PythonMemoryRouter {
     provider_names: Vec<String>,
+}
+
+struct PythonLlmProvider {
+    model: String,
+    handler: Arc<dyn EnkiLlmHandler>,
 }
 
 #[async_trait(?Send)]
@@ -224,6 +240,84 @@ fn build_memory_manager(
     )
 }
 
+#[async_trait]
+impl LlmProvider for PythonLlmProvider {
+    async fn complete(
+        &self,
+        messages: &[ChatMessage],
+        _config: &LlmConfig,
+    ) -> core_next::llm::Result<LlmResponse> {
+        self.complete_with_tools(messages, &[], &LlmConfig::default()).await
+    }
+
+    async fn complete_stream(
+        &self,
+        _messages: &[ChatMessage],
+        _config: &LlmConfig,
+    ) -> core_next::llm::Result<ResponseStream> {
+        Ok(Box::pin(stream::empty()))
+    }
+
+    async fn complete_with_tools(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolDefinition],
+        _config: &LlmConfig,
+    ) -> core_next::llm::Result<LlmResponse> {
+        let messages_json = serde_json::to_string(messages).map_err(|error| {
+            core_next::llm::LlmError::Provider(format!("Failed to serialize messages: {error}"))
+        })?;
+        let tools_json = serde_json::to_string(tools).map_err(|error| {
+            core_next::llm::LlmError::Provider(format!("Failed to serialize tools: {error}"))
+        })?;
+
+        let raw = self
+            .handler
+            .complete(self.model.clone(), messages_json, tools_json);
+
+        if let Ok(response) = serde_json::from_str::<LlmResponse>(&raw) {
+            return Ok(response);
+        }
+
+        if let Ok(value) = serde_json::from_str::<Value>(&raw) {
+            return Ok(LlmResponse {
+                content: value
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                usage: None,
+                tool_calls: value
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|tool_call| tool_call.to_string())
+                    .collect(),
+                model: self.model.clone(),
+                finish_reason: Some("stop".to_string()),
+            });
+        }
+
+        Ok(LlmResponse {
+            content: raw,
+            usage: None,
+            tool_calls: Vec::new(),
+            model: self.model.clone(),
+            finish_reason: Some("stop".to_string()),
+        })
+    }
+
+    fn name(&self) -> &'static str {
+        "python"
+    }
+
+    fn available_models(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+}
+
 struct RunRequest {
     session_id: String,
     user_message: String,
@@ -331,6 +425,118 @@ impl EnkiAgent {
         )
     }
 
+    pub fn with_llm(
+        name: String,
+        system_prompt_preamble: String,
+        model: String,
+        max_iterations: u32,
+        workspace_home: Option<String>,
+        llm_handler: Box<dyn EnkiLlmHandler>,
+    ) -> Self {
+        let definition = AgentDefinition {
+            name,
+            system_prompt_preamble,
+            model,
+            max_iterations: max_iterations as usize,
+        };
+
+        Self::from_custom_tools_memory_and_llm(
+            definition,
+            workspace_home,
+            Vec::new(),
+            None,
+            Vec::new(),
+            None,
+            Some(llm_handler),
+        )
+    }
+
+    pub fn with_tools_and_llm(
+        name: String,
+        system_prompt_preamble: String,
+        model: String,
+        max_iterations: u32,
+        workspace_home: Option<String>,
+        tools: Vec<EnkiTool>,
+        handler: Box<dyn EnkiToolHandler>,
+        llm_handler: Box<dyn EnkiLlmHandler>,
+    ) -> Self {
+        let definition = AgentDefinition {
+            name,
+            system_prompt_preamble,
+            model,
+            max_iterations: max_iterations as usize,
+        };
+
+        Self::from_custom_tools_memory_and_llm(
+            definition,
+            workspace_home,
+            tools,
+            Some(handler),
+            Vec::new(),
+            None,
+            Some(llm_handler),
+        )
+    }
+
+    pub fn with_memory_and_llm(
+        name: String,
+        system_prompt_preamble: String,
+        model: String,
+        max_iterations: u32,
+        workspace_home: Option<String>,
+        memories: Vec<EnkiMemoryModule>,
+        handler: Box<dyn EnkiMemoryHandler>,
+        llm_handler: Box<dyn EnkiLlmHandler>,
+    ) -> Self {
+        let definition = AgentDefinition {
+            name,
+            system_prompt_preamble,
+            model,
+            max_iterations: max_iterations as usize,
+        };
+
+        Self::from_custom_tools_memory_and_llm(
+            definition,
+            workspace_home,
+            Vec::new(),
+            None,
+            memories,
+            Some(handler),
+            Some(llm_handler),
+        )
+    }
+
+    pub fn with_tools_memory_and_llm(
+        name: String,
+        system_prompt_preamble: String,
+        model: String,
+        max_iterations: u32,
+        workspace_home: Option<String>,
+        tools: Vec<EnkiTool>,
+        tool_handler: Box<dyn EnkiToolHandler>,
+        memories: Vec<EnkiMemoryModule>,
+        memory_handler: Box<dyn EnkiMemoryHandler>,
+        llm_handler: Box<dyn EnkiLlmHandler>,
+    ) -> Self {
+        let definition = AgentDefinition {
+            name,
+            system_prompt_preamble,
+            model,
+            max_iterations: max_iterations as usize,
+        };
+
+        Self::from_custom_tools_memory_and_llm(
+            definition,
+            workspace_home,
+            tools,
+            Some(tool_handler),
+            memories,
+            Some(memory_handler),
+            Some(llm_handler),
+        )
+    }
+
     fn from_registry(
         definition: AgentDefinition,
         workspace_home: Option<String>,
@@ -407,6 +613,26 @@ impl EnkiAgent {
         memories: Vec<EnkiMemoryModule>,
         memory_handler: Option<Box<dyn EnkiMemoryHandler>>,
     ) -> Self {
+        Self::from_custom_tools_memory_and_llm(
+            definition,
+            workspace_home,
+            tools,
+            tool_handler,
+            memories,
+            memory_handler,
+            None,
+        )
+    }
+
+    fn from_custom_tools_memory_and_llm(
+        definition: AgentDefinition,
+        workspace_home: Option<String>,
+        tools: Vec<EnkiTool>,
+        tool_handler: Option<Box<dyn EnkiToolHandler>>,
+        memories: Vec<EnkiMemoryModule>,
+        memory_handler: Option<Box<dyn EnkiMemoryHandler>>,
+        llm_handler: Option<Box<dyn EnkiLlmHandler>>,
+    ) -> Self {
         let workspace_home = workspace_home.map(PathBuf::from);
         let (request_tx, request_rx) = mpsc::channel::<RunRequest>();
 
@@ -443,13 +669,19 @@ impl EnkiAgent {
             let memory = memory_handler.map(|handler| {
                 build_memory_manager(memories, Arc::from(handler))
             });
+            let llm = llm_handler.map(|handler| {
+                Box::new(PythonLlmProvider {
+                    model: definition.model.clone(),
+                    handler: Arc::from(handler),
+                }) as Box<dyn LlmProvider>
+            });
 
             let agent =
                 match runtime.block_on(Agent::with_definition_tool_registry_executor_llm_and_workspace(
                     definition,
                     tool_registry,
                     Box::new(RegistryToolExecutor),
-                    None,
+                    llm,
                     memory,
                     workspace_home,
                 )) {
