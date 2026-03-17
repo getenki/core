@@ -2,7 +2,8 @@
   "name": "enki-js",
   "version": "1.0.0",
   "description": "Template project for writing node package with napi-rs",
-  "main": "index.js",
+  "main": "client.js",
+  "types": "client.d.ts",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/napi-rs/package-template.git"
@@ -18,6 +19,8 @@
     "node-addon-api"
   ],
   "files": [
+    "client.d.ts",
+    "client.js",
     "index.d.ts",
     "index.js",
     "browser.js"
@@ -100,5 +103,8 @@
     "singleQuote": true,
     "arrowParens": "always"
   },
-  "packageManager": "yarn@4.12.0"
+  "packageManager": "yarn@4.12.0",
+  "optionalDependencies": {
+    "enki-js-win32-x64-msvc": "1.0.0"
+  }
 }
