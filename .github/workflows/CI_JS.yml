@@ -11,15 +11,18 @@ env:
     tags-ignore:
       - '**'
     paths-ignore:
-      - '../../README.md'
-      - ../../LICENSE
-      - '../../.gitignore'
+      - README.md
+      - LICENSE
+      - .gitignore
       - .editorconfig
-      - ../../docs
+      - docs/**
   pull_request: null
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+defaults:
+  run:
+    working-directory: crates/bindings/enki-js
 jobs:
   lint:
     name: Lint
@@ -31,12 +34,15 @@ jobs:
         with:
           node-version: 24
           cache: yarn
+          cache-dependency-path: crates/bindings/enki-js/yarn.lock
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - name: Remove unpublished optional native packages for CI
+        run: npm pkg delete optionalDependencies
       - name: Install dependencies
-        run: yarn install
+        run: yarn install --no-immutable
       - name: Oxlint
         run: yarn lint
       - name: Cargo fmt
@@ -60,6 +66,7 @@ jobs:
         with:
           node-version: 24
           cache: yarn
+          cache-dependency-path: crates/bindings/enki-js/yarn.lock
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -91,8 +98,10 @@ jobs:
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
         shell: bash
+      - name: Remove unpublished optional native packages for CI
+        run: npm pkg delete optionalDependencies
       - name: Install dependencies
-        run: yarn install
+        run: yarn install --no-immutable
       - name: Build
         run: ${{ matrix.settings.build }}
         shell: bash
@@ -101,8 +110,8 @@ jobs:
         with:
           name: bindings-${{ matrix.settings.target }}
           path: |
-            ${{ env.APP_NAME }}.*.node
-            ${{ env.APP_NAME }}.*.wasm
+            crates/bindings/enki-js/${{ env.APP_NAME }}.*.node
+            crates/bindings/enki-js/${{ env.APP_NAME }}.*.wasm
           if-no-files-found: error
   test-macOS-windows-binding:
     name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
@@ -126,14 +135,17 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: yarn
+          cache-dependency-path: crates/bindings/enki-js/yarn.lock
           architecture: ${{ matrix.settings.architecture }}
+      - name: Remove unpublished optional native packages for CI
+        run: npm pkg delete optionalDependencies
       - name: Install dependencies
-        run: yarn install
+        run: yarn install --no-immutable
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: .
+          path: crates/bindings/enki-js
       - name: List packages
         run: ls -R .
         shell: bash
@@ -155,14 +167,23 @@ jobs:
         with:
           node-version: 24
           cache: yarn
+          cache-dependency-path: crates/bindings/enki-js/yarn.lock
+      - name: Backup package manifest
+        run: Copy-Item package.json package.json.ci-backup
+        shell: pwsh
+      - name: Remove unpublished optional native packages for CI
+        run: npm pkg delete optionalDependencies
       - name: Install dependencies
-        run: yarn install
+        run: yarn install --no-immutable
+      - name: Restore package manifest
+        run: Move-Item -Force package.json.ci-backup package.json
+        shell: pwsh
       - name: create npm dirs
         run: yarn napi create-npm-dirs
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
-          path: artifacts
+          path: crates/bindings/enki-js/artifacts
       - name: Move artifacts
         run: yarn artifacts
       - name: List packages
