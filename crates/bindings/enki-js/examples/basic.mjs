@@ -2,62 +2,84 @@ import init, { EnkiJsAgent } from "../pkg/enki_js.js";
 
 await init();
 
-const tools = [
-  {
-    name: "echo",
-    description: "Echo a value back to the agent",
-    parameters_json: JSON.stringify({
-      type: "object",
-      properties: {
-        value: { type: "string" }
-      },
-      required: ["value"]
-    })
-  }
-];
+const apiKey =
+    process.env.GOOGLE_AI_STUDIO_API_KEY ?? process.env.GEMINI_API_KEY ?? "AIzaSyAZEXZmE9THksdS5_8qtx2QhswgGiu6CxM";
 
-const llmHandler = async ({ messages }) => {
-  const last = messages[messages.length - 1];
+if (!apiKey) {
+    throw new Error(
+        "Set GOOGLE_AI_STUDIO_API_KEY or GEMINI_API_KEY before running this example."
+    );
+}
 
-  if (last.role === "user") {
-    return {
-      content: "",
-      tool_calls: [
+const model = "google::gemini-3.1-pro-preview";
+
+const toGeminiModel = (value) =>
+    value.startsWith("google::") ? value.slice("google::".length) : value;
+
+const toGeminiContent = (message) => ({
+    role: message.role === "assistant" ? "model" : "user",
+    parts: [{ text: message.content }]
+});
+
+const llmHandler = async ({ agent, messages }) => {
+    const systemText = messages
+        .filter((message) => message.role === "system")
+        .map((message) => message.content)
+        .join("\n\n")
+        .trim();
+
+    const contents = messages
+        .filter((message) => message.role !== "system")
+        .map(toGeminiContent);
+
+    const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${toGeminiModel(agent.model)}:generateContent`,
         {
-          id: "call-1",
-          function: {
-            name: "echo",
-            arguments: { value: last.content }
-          }
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                "x-goog-api-key": apiKey
+            },
+            body: JSON.stringify({
+                contents,
+                systemInstruction: systemText
+                    ? { parts: [{ text: systemText }] }
+                    : undefined
+            })
         }
-      ]
-    };
-  }
+    );
 
-  if (last.role === "tool") {
-    return `Tool said: ${last.content}`;
-  }
+    if (!response.ok) {
+        throw new Error(
+            `Google AI Studio request failed: ${response.status} ${await response.text()}`
+        );
+    }
 
-  return "No action taken.";
-};
+    const body = await response.json();
+    const parts = body.candidates?.[0]?.content?.parts ?? [];
+    const text = parts
+        .map((part) => part.text)
+        .filter(Boolean)
+        .join("\n")
+        .trim();
 
-const toolHandler = async ({ tool, args }) => {
-  if (tool === "echo") {
-    return `echo:${args.value}`;
-  }
-
-  return `Unknown tool: ${tool}`;
+    return text || "No response returned.";
 };
 
 const agent = new EnkiJsAgent(
-  "Example Agent",
-  "Use the echo tool before answering.",
-  "js::demo",
-  4,
-  llmHandler,
-  toolHandler,
-  tools
+    "Simple Example Agent",
+    "Answer clearly and concisely.",
+    model,
+    1,
+    llmHandler,
+    null,
+    []
 );
 
-const result = await agent.run("demo-session", "hello from javascript");
+const sessionId = `example-${Date.now()}`;
+const result = await agent.run(
+    sessionId,
+    "Explain in two sentences what EnkiJS agents are."
+);
+
 console.log(result);

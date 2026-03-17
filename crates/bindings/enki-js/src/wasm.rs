@@ -1,23 +1,18 @@
-use async_trait::async_trait;
-use core_next::agent::{Agent, AgentDefinition};
-use core_next::llm::{
-    ChatMessage, LlmConfig, LlmProvider, LlmResponse, MessageRole, ResponseStream, ToolDefinition,
-};
-use core_next::memory::{MemoryManager, MemoryRouter, MemoryStrategy};
-use core_next::tooling::tool_calling::RegistryToolExecutor;
-use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
-use futures::stream;
 use js_sys::{Function, Promise};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 thread_local! {
     static CALLBACKS: RefCell<CallbackRegistry> = RefCell::new(CallbackRegistry::default());
 }
+
+static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Default)]
 struct CallbackRegistry {
@@ -95,6 +90,8 @@ struct JsChatMessage {
 struct JsToolDefinition {
     name: String,
     description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parameters: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -104,168 +101,17 @@ struct JsLlmResponse {
     tool_calls: Vec<Value>,
 }
 
-#[derive(Default)]
-struct NoopMemoryRouter;
-
-#[async_trait(?Send)]
-impl MemoryRouter for NoopMemoryRouter {
-    async fn select(&self, _user_message: &str) -> MemoryStrategy {
-        MemoryStrategy {
-            active_providers: Vec::new(),
-            max_context_entries: 0,
-        }
-    }
+#[derive(Clone)]
+struct ToolContext {
+    agent_dir: PathBuf,
+    workspace_dir: PathBuf,
+    sessions_dir: PathBuf,
 }
 
-struct JsLlmProvider {
-    callback_id: u32,
-    options: AgentOptions,
-}
-
-#[async_trait(?Send)]
-impl LlmProvider for JsLlmProvider {
-    async fn complete(
-        &self,
-        messages: &[ChatMessage],
-        _config: &LlmConfig,
-    ) -> core_next::llm::Result<LlmResponse> {
-        self.invoke(messages, &[]).await
-    }
-
-    async fn complete_stream(
-        &self,
-        _messages: &[ChatMessage],
-        _config: &LlmConfig,
-    ) -> core_next::llm::Result<ResponseStream> {
-        Ok(Box::pin(stream::empty()))
-    }
-
-    async fn complete_with_tools(
-        &self,
-        messages: &[ChatMessage],
-        tools: &[ToolDefinition],
-        _config: &LlmConfig,
-    ) -> core_next::llm::Result<LlmResponse> {
-        self.invoke(messages, tools).await
-    }
-
-    fn name(&self) -> &'static str {
-        "javascript"
-    }
-
-    fn available_models(&self) -> Vec<&'static str> {
-        vec!["js::callback"]
-    }
-}
-
-impl JsLlmProvider {
-    async fn invoke(
-        &self,
-        messages: &[ChatMessage],
-        tools: &[ToolDefinition],
-    ) -> core_next::llm::Result<LlmResponse> {
-        let payload = JsLlmRequest {
-            agent: JsAgentMetadata {
-                name: self.options.name.clone(),
-                system_prompt_preamble: self.options.system_prompt_preamble.clone(),
-                model: self.options.model.clone(),
-                max_iterations: self.options.max_iterations,
-            },
-            messages: messages
-                .iter()
-                .map(|message| JsChatMessage {
-                    role: message_role_name(message.role).to_string(),
-                    content: message.content.clone(),
-                    tool_call_id: message.tool_call_id.clone(),
-                })
-                .collect(),
-            tools: tools
-                .iter()
-                .map(|tool| JsToolDefinition {
-                    name: tool.name.clone(),
-                    description: tool.description.clone(),
-                })
-                .collect(),
-        };
-
-        let payload = serde_wasm_bindgen::to_value(&payload)
-            .map_err(|error| core_next::llm::LlmError::Provider(error.to_string()))?;
-        let result = invoke_callback(self.callback_id, &payload)
-            .await
-            .map_err(|error| core_next::llm::LlmError::Provider(js_error_message(&error)))?;
-
-        if let Some(content) = result.as_string() {
-            return Ok(LlmResponse {
-                content,
-                usage: None,
-                tool_calls: Vec::new(),
-                model: self.options.model.clone(),
-                finish_reason: Some("stop".to_string()),
-            });
-        }
-
-        let response: JsLlmResponse = serde_wasm_bindgen::from_value(result)
-            .map_err(|error| core_next::llm::LlmError::Provider(error.to_string()))?;
-
-        Ok(LlmResponse {
-            content: response.content,
-            usage: None,
-            tool_calls: response
-                .tool_calls
-                .into_iter()
-                .map(|tool_call| tool_call.to_string())
-                .collect(),
-            model: self.options.model.clone(),
-            finish_reason: Some("stop".to_string()),
-        })
-    }
-}
-
-struct JsTool {
+struct ToolInvocation {
     name: String,
-    description: String,
-    parameters: Value,
-    callback_id: Option<u32>,
-}
-
-#[async_trait(?Send)]
-impl Tool for JsTool {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn description(&self) -> &str {
-        &self.description
-    }
-
-    fn parameters(&self) -> Value {
-        self.parameters.clone()
-    }
-
-    async fn execute(&self, args: &Value, ctx: &ToolContext) -> String {
-        let Some(callback_id) = self.callback_id else {
-            return format!("Error: tool handler not configured for `{}`", self.name);
-        };
-
-        let payload = serde_wasm_bindgen::to_value(&serde_json::json!({
-            "tool": self.name,
-            "args": args,
-            "context": {
-                "agent_dir": ctx.agent_dir.to_string_lossy(),
-                "workspace_dir": ctx.workspace_dir.to_string_lossy(),
-                "sessions_dir": ctx.sessions_dir.to_string_lossy(),
-            }
-        }));
-
-        let Ok(payload) = payload else {
-            return "Error: failed to serialize tool request.".to_string();
-        };
-
-        match invoke_callback(callback_id, &payload).await {
-            Ok(result) => result.as_string().unwrap_or_else(|| js_error_message(&result)),
-            Err(error) => format!("Error: {}", js_error_message(&error)),
-        }
-    }
+    args: Value,
+    call_id: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -274,7 +120,7 @@ pub struct EnkiJsAgent {
     llm_callback_id: u32,
     tool_callback_id: Option<u32>,
     tools: Vec<EnkiJsTool>,
-    agent: RefCell<Option<Agent>>,
+    sessions: RefCell<HashMap<String, Vec<Value>>>,
 }
 
 #[wasm_bindgen]
@@ -310,33 +156,32 @@ impl EnkiJsAgent {
                 .map_err(|error| JsValue::from_str(&format!("Invalid tools array: {error}")))?
         };
 
-        let llm_callback_id = CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(llm_handler));
-        let tool_callback_id =
-            tool_handler.map(|function| CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(function)));
+        let llm_callback_id =
+            CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(llm_handler));
+        let tool_callback_id = tool_handler
+            .map(|function| CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(function)));
 
         Ok(Self {
             options,
             llm_callback_id,
             tool_callback_id,
             tools,
-            agent: RefCell::new(None),
+            sessions: RefCell::new(HashMap::new()),
         })
     }
 
     #[wasm_bindgen(js_name = run)]
     pub async fn run(&self, session_id: String, user_message: String) -> Result<String, JsValue> {
-        if self.agent.borrow().is_none() {
-            let agent = self.build_agent().await?;
-            self.agent.borrow_mut().replace(agent);
-        }
+        let mut messages = self
+            .sessions
+            .borrow()
+            .get(&session_id)
+            .cloned()
+            .unwrap_or_else(|| vec![self.system_message()]);
 
-        let agent = self
-            .agent
-            .borrow_mut()
-            .take()
-            .expect("agent initialized");
-        let response = agent.run(&session_id, &user_message).await;
-        self.agent.borrow_mut().replace(agent);
+        messages.push(self.user_message(user_message));
+        let response = self.run_loop(&mut messages).await?;
+        self.sessions.borrow_mut().insert(session_id, messages);
         Ok(response)
     }
 
@@ -348,7 +193,7 @@ impl EnkiJsAgent {
             .map(|tool| {
                 (
                     tool.name.clone(),
-                    serde_json::json!({
+                    json!({
                         "description": tool.description,
                         "parameters_json": tool.parameters_json,
                     }),
@@ -361,58 +206,403 @@ impl EnkiJsAgent {
 }
 
 impl EnkiJsAgent {
-    async fn build_agent(&self) -> Result<Agent, JsValue> {
-        let tool_registry = self.build_tool_registry()?;
-        let llm = JsLlmProvider {
-            callback_id: self.llm_callback_id,
-            options: self.options.clone(),
-        };
-        let memory = MemoryManager::new(Box::new(NoopMemoryRouter), Vec::new());
+    async fn run_loop(&self, messages: &mut Vec<Value>) -> Result<String, JsValue> {
+        let mut last_response = String::new();
+        let ctx = self.tool_context();
 
-        Agent::with_definition_tool_registry_executor_llm_and_workspace(
-            AgentDefinition {
+        for _ in 0..self.options.max_iterations.max(1) {
+            let response = self.invoke_llm(messages).await?;
+            let mut assistant_message = json!({
+                "role": "assistant",
+                "content": response.content,
+            });
+
+            if !response.tool_calls.is_empty() {
+                assistant_message["tool_calls"] = Value::Array(response.tool_calls.clone());
+            }
+
+            last_response = assistant_message
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+
+            let invocations = self.extract_tool_invocations(&assistant_message);
+            messages.push(assistant_message);
+
+            if invocations.is_empty() {
+                return Ok(last_response);
+            }
+
+            for invocation in invocations {
+                let tool_message = self.execute_tool(&invocation, &ctx).await;
+                messages.push(tool_message);
+            }
+        }
+
+        Ok(last_response)
+    }
+
+    async fn invoke_llm(&self, messages: &[Value]) -> Result<JsLlmResponse, JsValue> {
+        let payload = JsLlmRequest {
+            agent: JsAgentMetadata {
                 name: self.options.name.clone(),
                 system_prompt_preamble: self.options.system_prompt_preamble.clone(),
                 model: self.options.model.clone(),
-                max_iterations: self.options.max_iterations as usize,
+                max_iterations: self.options.max_iterations,
             },
-            tool_registry,
-            Box::new(RegistryToolExecutor),
-            Some(Box::new(llm)),
-            Some(memory),
-            None,
-        )
-        .await
-        .map_err(|error| JsValue::from_str(&error))
-    }
+            messages: self.to_js_messages(messages),
+            tools: self.js_tools()?,
+        };
 
-    fn build_tool_registry(&self) -> Result<ToolRegistry, JsValue> {
-        let mut registry = ToolRegistry::new();
+        let payload = serde_wasm_bindgen::to_value(&payload)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        let result = invoke_callback(self.llm_callback_id, &payload).await?;
 
-        for tool in &self.tools {
-            let parameters = if tool.parameters_json.trim().is_empty() {
-                Value::Null
-            } else {
-                serde_json::from_str::<Value>(&tool.parameters_json).map_err(|error| {
-                    JsValue::from_str(&format!(
-                        "Invalid parameters_json for tool `{}`: {error}",
-                        tool.name
-                    ))
-                })?
-            };
-
-            registry.insert(
-                tool.name.clone(),
-                Box::new(JsTool {
-                    name: tool.name.clone(),
-                    description: tool.description.clone(),
-                    parameters,
-                    callback_id: self.tool_callback_id,
-                }),
-            );
+        if let Some(content) = result.as_string() {
+            return Ok(JsLlmResponse {
+                content,
+                tool_calls: Vec::new(),
+            });
         }
 
-        Ok(registry)
+        serde_wasm_bindgen::from_value(result)
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    async fn execute_tool(&self, invocation: &ToolInvocation, ctx: &ToolContext) -> Value {
+        let content = match self.tool_callback_id {
+            Some(callback_id) => {
+                let payload = serde_wasm_bindgen::to_value(&json!({
+                    "tool": invocation.name,
+                    "args": normalize_tool_args(&invocation.args),
+                    "context": {
+                        "agent_dir": ctx.agent_dir.to_string_lossy(),
+                        "workspace_dir": ctx.workspace_dir.to_string_lossy(),
+                        "sessions_dir": ctx.sessions_dir.to_string_lossy(),
+                    }
+                }));
+
+                match payload {
+                    Ok(payload) => match invoke_callback(callback_id, &payload).await {
+                        Ok(result) => result
+                            .as_string()
+                            .unwrap_or_else(|| js_error_message(&result)),
+                        Err(error) => format!("Error: {}", js_error_message(&error)),
+                    },
+                    Err(_) => "Error: failed to serialize tool request.".to_string(),
+                }
+            }
+            None => format!(
+                "Error: tool handler not configured for `{}`",
+                invocation.name
+            ),
+        };
+
+        let mut message = json!({
+            "role": "tool",
+            "tool_name": invocation.name,
+            "content": content,
+        });
+
+        if let Some(call_id) = &invocation.call_id {
+            message["tool_call_id"] = Value::String(call_id.clone());
+        }
+
+        message
+    }
+
+    fn extract_tool_invocations(&self, assistant_message: &Value) -> Vec<ToolInvocation> {
+        let native_calls = assistant_message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        if !native_calls.is_empty() {
+            return native_calls
+                .into_iter()
+                .map(|tool_call| ToolInvocation {
+                    name: tool_call
+                        .get("function")
+                        .and_then(|function| function.get("name"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    args: tool_call
+                        .get("function")
+                        .and_then(|function| function.get("arguments"))
+                        .map(normalize_tool_args)
+                        .unwrap_or(Value::Null),
+                    call_id: tool_call
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                })
+                .collect();
+        }
+
+        self.parse_content_tool_call(assistant_message)
+            .map(|(name, args)| {
+                vec![ToolInvocation {
+                    name,
+                    args,
+                    call_id: None,
+                }]
+            })
+            .unwrap_or_default()
+    }
+
+    fn parse_content_tool_call(&self, assistant_message: &Value) -> Option<(String, Value)> {
+        let content = assistant_message.get("content")?.as_str()?;
+        Self::extract_embedded_tool_call(content)
+    }
+
+    fn extract_embedded_tool_call(content: &str) -> Option<(String, Value)> {
+        if let Some(tool_call) = Self::parse_tool_call_value(content) {
+            return Some(tool_call);
+        }
+
+        for block in Self::extract_fenced_code_blocks(content) {
+            if let Some(tool_call) = Self::parse_tool_call_value(block) {
+                return Some(tool_call);
+            }
+            for candidate in Self::json_object_candidates(block) {
+                if let Some(tool_call) = Self::parse_tool_call_value(candidate) {
+                    return Some(tool_call);
+                }
+            }
+        }
+
+        for candidate in Self::json_object_candidates(content) {
+            if let Some(tool_call) = Self::parse_tool_call_value(candidate) {
+                return Some(tool_call);
+            }
+        }
+
+        None
+    }
+
+    fn extract_fenced_code_blocks(content: &str) -> Vec<&str> {
+        let mut blocks = Vec::new();
+        let mut remaining = content;
+
+        while let Some(fence_start) = remaining.find("```") {
+            let after_fence = &remaining[fence_start + 3..];
+            let body_start = after_fence.find('\n').map(|index| index + 1).unwrap_or(0);
+            let body = &after_fence[body_start..];
+
+            if let Some(fence_end) = body.find("```") {
+                let block = body[..fence_end].trim();
+                if !block.is_empty() {
+                    blocks.push(block);
+                }
+                remaining = &body[fence_end + 3..];
+            } else {
+                break;
+            }
+        }
+
+        blocks
+    }
+
+    fn parse_tool_call_value(raw: &str) -> Option<(String, Value)> {
+        if let Some(result) = Self::try_parse_tool_call(raw) {
+            return Some(result);
+        }
+
+        let mut repaired = raw.to_string();
+        for _ in 0..3 {
+            repaired.push('}');
+            if let Some(result) = Self::try_parse_tool_call(&repaired) {
+                return Some(result);
+            }
+        }
+
+        None
+    }
+
+    fn try_parse_tool_call(raw: &str) -> Option<(String, Value)> {
+        let parsed: Value = serde_json::from_str(raw).ok()?;
+        let tool_name = parsed.get("tool")?.as_str()?.to_string();
+        let args = parsed.get("args").cloned().unwrap_or(Value::Null);
+        Some((tool_name, args))
+    }
+
+    fn json_object_candidates(content: &str) -> Vec<&str> {
+        let mut candidates = Vec::new();
+        let mut start = None;
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+
+        for (index, ch) in content.char_indices() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+
+                match ch {
+                    '\\' => escaped = true,
+                    '"' => in_string = false,
+                    _ => {}
+                }
+
+                continue;
+            }
+
+            match ch {
+                '"' => in_string = true,
+                '{' => {
+                    if depth == 0 {
+                        start = Some(index);
+                    }
+                    depth += 1;
+                }
+                '}' => {
+                    if depth == 0 {
+                        continue;
+                    }
+
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(start_index) = start.take() {
+                            candidates.push(&content[start_index..=index]);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if depth > 0 {
+            if let Some(start_index) = start {
+                candidates.push(&content[start_index..]);
+            }
+        }
+
+        candidates
+    }
+
+    fn to_js_messages(&self, messages: &[Value]) -> Vec<JsChatMessage> {
+        messages
+            .iter()
+            .filter_map(|value| {
+                let role = value.get("role").and_then(Value::as_str)?.to_string();
+                Some(JsChatMessage {
+                    role,
+                    content: value
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    tool_call_id: value
+                        .get("tool_call_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                })
+            })
+            .collect()
+    }
+
+    fn js_tools(&self) -> Result<Vec<JsToolDefinition>, JsValue> {
+        self.tools
+            .iter()
+            .map(|tool| {
+                let parameters = if tool.parameters_json.trim().is_empty() {
+                    None
+                } else {
+                    Some(
+                        serde_json::from_str::<Value>(&tool.parameters_json).map_err(|error| {
+                            JsValue::from_str(&format!(
+                                "Invalid parameters_json for tool `{}`: {error}",
+                                tool.name
+                            ))
+                        })?,
+                    )
+                };
+
+                Ok(JsToolDefinition {
+                    name: tool.name.clone(),
+                    description: Some(tool.description.clone()),
+                    parameters,
+                })
+            })
+            .collect()
+    }
+
+    fn system_message(&self) -> Value {
+        json!({
+            "role": "system",
+            "content": self.system_prompt(),
+        })
+    }
+
+    fn user_message(&self, content: String) -> Value {
+        json!({
+            "role": "user",
+            "content": content,
+            "request_id": next_request_id(),
+        })
+    }
+
+    fn system_prompt(&self) -> String {
+        let ctx = self.tool_context();
+
+        format!(
+            r#"You are {}.
+{} Use tools via JSON calls when needed.
+- Process each incoming user message as a loop:
+  1. Receive the message.
+  2. Interpret it.
+  3. Choose the next action.
+  4. Either reply immediately, call a tool, or ask a follow-up question.
+  5. If you call a tool, read the result and continue the loop.
+  6. Stop only when a final reply is ready.
+- One user message may require multiple internal iterations before the final answer.
+- If a tool is needed, prefer native tool calls. If native tool calling is unavailable, respond with ONLY {{"tool": "tool_name", "args": {{...}}}}.
+- When done, respond with plain text.
+Available tools: {}
+Agent workspace: {}
+Current task workspace: {}"#,
+            self.options.name,
+            self.options.system_prompt_preamble,
+            self.prompt_tool_catalog(),
+            ctx.agent_dir.display(),
+            ctx.workspace_dir.display()
+        )
+    }
+
+    fn prompt_tool_catalog(&self) -> Value {
+        Value::Object(
+            self.tools
+                .iter()
+                .map(|tool| {
+                    let parameters = if tool.parameters_json.trim().is_empty() {
+                        Value::Null
+                    } else {
+                        serde_json::from_str::<Value>(&tool.parameters_json).unwrap_or(Value::Null)
+                    };
+
+                    (
+                        tool.name.clone(),
+                        json!({
+                            "description": tool.description,
+                            "parameters": parameters,
+                        }),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    fn tool_context(&self) -> ToolContext {
+        ToolContext {
+            agent_dir: PathBuf::from("agent"),
+            workspace_dir: PathBuf::from("workspace"),
+            sessions_dir: PathBuf::from("sessions"),
+        }
     }
 }
 
@@ -441,17 +631,24 @@ async fn invoke_callback(callback_id: u32, payload: &JsValue) -> Result<JsValue,
     }
 }
 
-fn message_role_name(role: MessageRole) -> &'static str {
-    match role {
-        MessageRole::System => "system",
-        MessageRole::User => "user",
-        MessageRole::Assistant => "assistant",
-        MessageRole::Tool => "tool",
+fn normalize_tool_args(args: &Value) -> Value {
+    match args {
+        Value::String(raw) => {
+            serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.clone()))
+        }
+        _ => args.clone(),
     }
 }
 
+fn next_request_id() -> String {
+    format!("req-{}", REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
 fn js_error_message(value: &JsValue) -> String {
-    value
-        .as_string()
-        .unwrap_or_else(|| js_sys::JSON::stringify(value).ok().and_then(|v| v.as_string()).unwrap_or_else(|| "JavaScript error".to_string()))
+    value.as_string().unwrap_or_else(|| {
+        js_sys::JSON::stringify(value)
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_else(|| "JavaScript error".to_string())
+    })
 }
