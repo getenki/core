@@ -1,16 +1,18 @@
 
 [package]
 authors = ["LongYinan <lynweklm@gmail.com>"]
-edition = "2021"
+edition.workspace = true
 name = "enki_js"
-version = "0.1.0"
+version.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = "3.0.0"
+napi = { version = "3.0.0", features = ["tokio_rt"] }
 napi-derive = "3.0.0"
+core_next = { package = "core", path = "../../core" }
+tokio.workspace = true
 
 [build-dependencies]
 napi-build = "2"

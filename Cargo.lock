@@ -285,11 +285,13 @@ dependencies = [
 
 [[package]]
 name = "enki_js"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
+ "core",
  "napi",
  "napi-build",
  "napi-derive",
+ "tokio",
 ]
 
 [[package]]
@@ -859,6 +861,7 @@ dependencies = [
  "napi-sys",
  "nohash-hasher",
  "rustc-hash",
+ "tokio",
 ]
 
 [[package]]
