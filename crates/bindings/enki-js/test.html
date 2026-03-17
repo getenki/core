@@ -84,7 +84,13 @@
       Build the web package with <code>npm run build:web</code>, then serve this folder with
       <code>npm run serve:web</code> and open <code>http://localhost:8080/test.html</code>.
     </p>
+    <p>
+      Enter a Google AI Studio API key, then run a prompt against Gemini with a minimal agent:
+      no tools and no reused session memory.
+    </p>
 
+    <label for="api-key">Google AI Studio API key</label>
+    <textarea id="api-key" placeholder="AIza..."></textarea>
     <label for="prompt">Prompt</label>
     <textarea id="prompt">hello from the browser</textarea>
     <button id="run">Run agent</button>
@@ -97,74 +103,90 @@
     import init, { EnkiJsAgent } from "./pkg-web/enki_js.js";
 
     const output = document.getElementById("output");
+    const apiKeyInput = document.getElementById("api-key");
     const prompt = document.getElementById("prompt");
     const runButton = document.getElementById("run");
 
-    const tools = [
-      {
-        name: "echo",
-        description: "Echo a value back to the model",
-        parameters_json: JSON.stringify({
-          type: "object",
-          properties: {
-            value: { type: "string" }
+    const model = "google::gemini-3.1-pro-preview";
+
+    const toGeminiModel = (value) =>
+      value.startsWith("google::") ? value.slice("google::".length) : value;
+
+    const toGeminiContent = (message) => ({
+      role: message.role === "assistant" ? "model" : "user",
+      parts: [{ text: message.content }]
+    });
+
+    const llmHandler = async ({ agent, messages }) => {
+      const apiKey = apiKeyInput.value.trim();
+
+      if (!apiKey) {
+        throw new Error("Enter a Google AI Studio API key.");
+      }
+
+      const systemText = messages
+        .filter((message) => message.role === "system")
+        .map((message) => message.content)
+        .join("\n\n")
+        .trim();
+
+      const contents = messages
+        .filter((message) => message.role !== "system")
+        .map(toGeminiContent);
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${toGeminiModel(
+          agent.model
+        )}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-goog-api-key": apiKey
           },
-          required: ["value"]
-        })
-      }
-    ];
+          body: JSON.stringify({
+            contents,
+            systemInstruction: systemText
+              ? { parts: [{ text: systemText }] }
+              : undefined
+          })
+        }
+      );
 
-    const llmHandler = async ({ messages }) => {
-      const last = messages[messages.length - 1];
-
-      if (last.role === "user") {
-        return {
-          content: "",
-          tool_calls: [
-            {
-              id: "call-1",
-              function: {
-                name: "echo",
-                arguments: { value: last.content }
-              }
-            }
-          ]
-        };
+      if (!response.ok) {
+        throw new Error(
+          `Google AI Studio request failed: ${response.status} ${await response.text()}`
+        );
       }
 
-      if (last.role === "tool") {
-        return `Browser test reply: ${last.content}`;
-      }
+      const body = await response.json();
+      const parts = body.candidates?.[0]?.content?.parts ?? [];
+      const text = parts
+        .map((part) => part.text)
+        .filter(Boolean)
+        .join("\n")
+        .trim();
 
-      return "No action taken.";
-    };
-
-    const toolHandler = async ({ tool, args }) => {
-      if (tool === "echo") {
-        return `echo:${args.value}`;
-      }
-
-      return `Unknown tool: ${tool}`;
+      return text || "No response returned.";
     };
 
     await init();
-
-    const agent = new EnkiJsAgent(
-      "Browser Test Agent",
-      "Always call the echo tool before replying.",
-      "js::browser-test",
-      4,
-      llmHandler,
-      toolHandler,
-      tools
-    );
 
     runButton.addEventListener("click", async () => {
       runButton.disabled = true;
       output.textContent = "Running...";
 
       try {
-        const result = await agent.run("browser-test", prompt.value);
+        const agent = new EnkiJsAgent(
+          "Browser Test Agent",
+          "Answer clearly and concisely.",
+          model,
+          1,
+          llmHandler,
+          null,
+          []
+        );
+        const result = await agent.run(`browser-test-${Date.now()}`, prompt.value);
         output.textContent = result;
       } catch (error) {
         output.textContent = String(error);
