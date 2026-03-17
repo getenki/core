@@ -37,6 +37,10 @@ callback interface EnkiMemoryHandler {
   void consolidate(string memory_name, string session_id);
 };
 
+callback interface EnkiLlmHandler {
+  string complete(string model, string messages_json, string tools_json);
+};
+
 interface EnkiAgent {
   [Name=new]
   constructor(
@@ -80,6 +84,54 @@ interface EnkiAgent {
     EnkiToolHandler tool_handler,
     sequence<EnkiMemoryModule> memories,
     EnkiMemoryHandler memory_handler
+  );
+
+  [Name=with_llm]
+  constructor(
+    string name,
+    string system_prompt_preamble,
+    string model,
+    u32 max_iterations,
+    string? workspace_home,
+    EnkiLlmHandler llm_handler
+  );
+
+  [Name=with_tools_and_llm]
+  constructor(
+    string name,
+    string system_prompt_preamble,
+    string model,
+    u32 max_iterations,
+    string? workspace_home,
+    sequence<EnkiTool> tools,
+    EnkiToolHandler handler,
+    EnkiLlmHandler llm_handler
+  );
+
+  [Name=with_memory_and_llm]
+  constructor(
+    string name,
+    string system_prompt_preamble,
+    string model,
+    u32 max_iterations,
+    string? workspace_home,
+    sequence<EnkiMemoryModule> memories,
+    EnkiMemoryHandler handler,
+    EnkiLlmHandler llm_handler
+  );
+
+  [Name=with_tools_memory_and_llm]
+  constructor(
+    string name,
+    string system_prompt_preamble,
+    string model,
+    u32 max_iterations,
+    string? workspace_home,
+    sequence<EnkiTool> tools,
+    EnkiToolHandler tool_handler,
+    sequence<EnkiMemoryModule> memories,
+    EnkiMemoryHandler memory_handler,
+    EnkiLlmHandler llm_handler
   );
 
   [Async]

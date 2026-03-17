@@ -17,6 +17,11 @@ from .enki_py import EnkiMemoryKind as _LowLevelMemoryKind
 from .enki_py import EnkiMemoryModule as _LowLevelMemoryModule
 from .enki_py import EnkiToolHandler
 try:
+    from .enki_py import EnkiLlmHandler
+except ImportError:  # pragma: no cover
+    class EnkiLlmHandler:  # type: ignore[override]
+        pass
+try:
     from .enki_py import EnkiTool as _LowLevelTool
 except ImportError:  # pragma: no cover
     from .enki_py import EnkiToolSpec as _LowLevelTool
@@ -182,6 +187,37 @@ class MemoryBackend(ABC):
             flush=self.flush,
             consolidate=self.consolidate,
         )
+
+
+class LlmProviderBackend(ABC):
+    """Base class for custom Python LLM providers."""
+
+    @abstractmethod
+    def complete(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> Any:
+        """Return either a plain string or a response object/dict."""
+
+
+class _PythonLlmHandler(EnkiLlmHandler):
+    def __init__(self, provider: "LlmProviderBackend | Callable[[str, list[dict[str, Any]], list[dict[str, Any]]], Any]") -> None:
+        self._provider = provider
+
+    def complete(self, model: str, messages_json: str, tools_json: str) -> str:
+        messages = json.loads(messages_json) if messages_json else []
+        tools = json.loads(tools_json) if tools_json else []
+
+        if isinstance(self._provider, LlmProviderBackend):
+            result = _resolve_callback_result(self._provider.complete(model, messages, tools))
+        else:
+            result = _resolve_callback_result(self._provider(model, messages, tools))
+
+        if isinstance(result, str):
+            return result
+        return json.dumps(result)
 
 
 class _PythonToolHandler(EnkiToolHandler):
@@ -426,6 +462,7 @@ class Agent(Generic[DepsT]):
         workspace_home: str | None = None,
         tools: list[Tool] | None = None,
         memories: list[MemoryModule] | None = None,
+        llm: LlmProviderBackend | Callable[[str, list[dict[str, Any]], list[dict[str, Any]]], Any] | None = None,
     ) -> None:
         self.model = model
         self.deps_type = deps_type
@@ -437,6 +474,7 @@ class Agent(Generic[DepsT]):
         self._memories: dict[str, MemoryModule] = {}
         self._handler = _PythonToolHandler(self._tools)
         self._memory_handler = _PythonMemoryHandler(self._memories)
+        self._llm_handler = _PythonLlmHandler(llm) if llm is not None else None
         self._backend: Any = None
         self._dirty = True
         if tools:
@@ -481,7 +519,51 @@ class Agent(Generic[DepsT]):
         tool_specs = self._tool_specs()
         memory_specs = self._memory_specs()
 
-        if tool_specs and memory_specs:
+        if self._llm_handler is not None and tool_specs and memory_specs:
+            self._backend = _LowLevelEnkiAgent.with_tools_memory_and_llm(
+                name=self.name,
+                system_prompt_preamble=self.instructions,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                workspace_home=self.workspace_home,
+                tools=tool_specs,
+                tool_handler=self._handler,
+                memories=memory_specs,
+                memory_handler=self._memory_handler,
+                llm_handler=self._llm_handler,
+            )
+        elif self._llm_handler is not None and tool_specs:
+            self._backend = _LowLevelEnkiAgent.with_tools_and_llm(
+                name=self.name,
+                system_prompt_preamble=self.instructions,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                workspace_home=self.workspace_home,
+                tools=tool_specs,
+                handler=self._handler,
+                llm_handler=self._llm_handler,
+            )
+        elif self._llm_handler is not None and memory_specs:
+            self._backend = _LowLevelEnkiAgent.with_memory_and_llm(
+                name=self.name,
+                system_prompt_preamble=self.instructions,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                workspace_home=self.workspace_home,
+                memories=memory_specs,
+                handler=self._memory_handler,
+                llm_handler=self._llm_handler,
+            )
+        elif self._llm_handler is not None:
+            self._backend = _LowLevelEnkiAgent.with_llm(
+                name=self.name,
+                system_prompt_preamble=self.instructions,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                workspace_home=self.workspace_home,
+                llm_handler=self._llm_handler,
+            )
+        elif tool_specs and memory_specs:
             self._backend = _LowLevelEnkiAgent.with_tools_and_memory(
                 name=self.name,
                 system_prompt_preamble=self.instructions,
@@ -576,6 +658,7 @@ class Agent(Generic[DepsT]):
 __all__ = [
     "Agent",
     "AgentRunResult",
+    "LlmProviderBackend",
     "MemoryBackend",
     "MemoryEntry",
     "MemoryKind",
