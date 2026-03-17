@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -94,6 +95,20 @@ struct JsToolDefinition {
     parameters: Option<Value>,
 }
 
+#[derive(Serialize)]
+struct JsToolCallbackRequest {
+    tool: String,
+    args: Value,
+    context: JsToolCallbackContext,
+}
+
+#[derive(Serialize)]
+struct JsToolCallbackContext {
+    agent_dir: String,
+    workspace_dir: String,
+    sessions_dir: String,
+}
+
 #[derive(Deserialize)]
 struct JsLlmResponse {
     content: String,
@@ -116,6 +131,10 @@ struct ToolInvocation {
 
 #[wasm_bindgen]
 pub struct EnkiJsAgent {
+    inner: Rc<EnkiJsAgentInner>,
+}
+
+struct EnkiJsAgentInner {
     options: AgentOptions,
     llm_callback_id: u32,
     tool_callback_id: Option<u32>,
@@ -162,32 +181,36 @@ impl EnkiJsAgent {
             .map(|function| CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(function)));
 
         Ok(Self {
-            options,
-            llm_callback_id,
-            tool_callback_id,
-            tools,
-            sessions: RefCell::new(HashMap::new()),
+            inner: Rc::new(EnkiJsAgentInner {
+                options,
+                llm_callback_id,
+                tool_callback_id,
+                tools,
+                sessions: RefCell::new(HashMap::new()),
+            }),
         })
     }
 
     #[wasm_bindgen(js_name = run)]
     pub async fn run(&self, session_id: String, user_message: String) -> Result<String, JsValue> {
-        let mut messages = self
+        let inner = Rc::clone(&self.inner);
+        let mut messages = inner
             .sessions
             .borrow()
             .get(&session_id)
             .cloned()
-            .unwrap_or_else(|| vec![self.system_message()]);
+            .unwrap_or_else(|| vec![inner.system_message()]);
 
-        messages.push(self.user_message(user_message));
-        let response = self.run_loop(&mut messages).await?;
-        self.sessions.borrow_mut().insert(session_id, messages);
+        messages.push(inner.user_message(user_message));
+        let response = inner.run_loop(&mut messages).await?;
+        inner.sessions.borrow_mut().insert(session_id, messages);
         Ok(response)
     }
 
     #[wasm_bindgen(js_name = toolCatalogJson)]
     pub fn tool_catalog_json(&self) -> String {
         let catalog = self
+            .inner
             .tools
             .iter()
             .map(|tool| {
@@ -205,7 +228,7 @@ impl EnkiJsAgent {
     }
 }
 
-impl EnkiJsAgent {
+impl EnkiJsAgentInner {
     async fn run_loop(&self, messages: &mut Vec<Value>) -> Result<String, JsValue> {
         let mut last_response = String::new();
         let ctx = self.tool_context();
@@ -273,15 +296,15 @@ impl EnkiJsAgent {
     async fn execute_tool(&self, invocation: &ToolInvocation, ctx: &ToolContext) -> Value {
         let content = match self.tool_callback_id {
             Some(callback_id) => {
-                let payload = serde_wasm_bindgen::to_value(&json!({
-                    "tool": invocation.name,
-                    "args": normalize_tool_args(&invocation.args),
-                    "context": {
-                        "agent_dir": ctx.agent_dir.to_string_lossy(),
-                        "workspace_dir": ctx.workspace_dir.to_string_lossy(),
-                        "sessions_dir": ctx.sessions_dir.to_string_lossy(),
-                    }
-                }));
+                let payload = serde_wasm_bindgen::to_value(&JsToolCallbackRequest {
+                    tool: invocation.name.clone(),
+                    args: normalize_tool_args(&invocation.args),
+                    context: JsToolCallbackContext {
+                        agent_dir: ctx.agent_dir.to_string_lossy().into_owned(),
+                        workspace_dir: ctx.workspace_dir.to_string_lossy().into_owned(),
+                        sessions_dir: ctx.sessions_dir.to_string_lossy().into_owned(),
+                    },
+                });
 
                 match payload {
                     Ok(payload) => match invoke_callback(callback_id, &payload).await {
@@ -606,7 +629,7 @@ Current task workspace: {}"#,
     }
 }
 
-impl Drop for EnkiJsAgent {
+impl Drop for EnkiJsAgentInner {
     fn drop(&mut self) {
         CALLBACKS.with(|callbacks| {
             let mut callbacks = callbacks.borrow_mut();

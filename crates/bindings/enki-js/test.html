@@ -81,7 +81,7 @@
   <main>
     <h1>enki-js wasm test</h1>
     <p>
-      Build the web package with <code>npm run build:web</code>, then serve this folder with
+      Build the package with <code>npm run build</code>, then serve this folder with
       <code>npm run serve:web</code> and open <code>http://localhost:8080/test.html</code>.
     </p>
     <p>
@@ -100,7 +100,7 @@
   </main>
 
   <script type="module">
-    import init, { EnkiJsAgent } from "./pkg-web/enki_js.js";
+    import init, { EnkiJsAgent } from "./pkg/enki_js.js";
 
     const output = document.getElementById("output");
     const apiKeyInput = document.getElementById("api-key");
