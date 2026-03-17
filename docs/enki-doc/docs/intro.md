@@ -3,87 +3,46 @@ sidebar_position: 1
 slug: /intro
 ---
 
-# enki-py
+# Enki
 
-`enki-py` is a Python package for building agents on top of Enki.
+Enki is an async-first agent framework built around a Rust runtime, with separate bindings for Python and JavaScript.
 
-Install it from PyPI with `pip`:
+This docs site now splits the main entry points by language so each stack has its own place:
+
+- [Python](/docs/python): published `enki-py` package, high-level `Agent` wrapper, low-level bindings, and memory APIs
+- [JavaScript](/docs/javascript): browser-oriented `enki-js` WASM bindings with JavaScript callbacks for LLMs and tools
+- [Rust](/docs/rust): core runtime, workspace layout, and local build workflow
+
+## Choose your entry point
+
+### Python
+
+Use Python if you want the most complete packaged experience today.
 
 ```bash
 pip install enki-py
 ```
 
-Or add it to a project managed by `uv`:
+Start here:
 
-```bash
-uv add enki-py
-```
-
-It exposes two layers:
-
-- A generated low-level API built around `EnkiAgent`, `EnkiTool`, and `EnkiToolHandler`
-- A higher-level Python wrapper in `enki_py.agent` that adds decorator-based tools, custom memory backends, dependency injection, and sync helpers
-
-## What to use
-
-Use the high-level `Agent` wrapper when you want Python ergonomics.
-
-For synchronous scripts, use `run_sync()`:
-
-```python
-from enki_py import Agent
-
-agent = Agent(
-    "ollama::qwen3.5:latest",
-    instructions="Answer clearly and keep responses short.",
-)
-
-result = agent.run_sync("Explain what this project does.")
-print(result.output)
-```
-
-For async applications, use `await agent.run(...)`:
-
-```python
-from enki_py import Agent
-
-agent = Agent(
-    "ollama::qwen3.5:latest",
-    instructions="Answer clearly and keep responses short.",
-)
-
-
-async def hello_enki():
-    result = await agent.run("Explain what this project does.")
-    print(result.output)
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(hello_enki())
-```
-
-Use the generated low-level API when you need exact control over tool specs and the tool handler callback:
-
-```python
-import enki_py
-
-agent = enki_py.EnkiAgent(
-    name="Minimal Agent",
-    system_prompt_preamble="You are concise.",
-    model="ollama::qwen3.5:latest",
-    max_iterations=4,
-    workspace_home=None,
-)
-```
-
-## In this documentation
-
+- [Python overview](/docs/python)
 - [Installation](/docs/installation)
 - [Getting Started Guide](/docs/agent-wrapper)
-- [Memory Backends](/docs/memory-backends)
-- [Memory Examples](/docs/memory-examples)
-- [Low-level API](/docs/low-level-api)
-- [Examples](/docs/examples)
-- [FAQ](/docs/faq)
+
+### JavaScript
+
+Use JavaScript when you want to run Enki through WebAssembly in a browser or another JS runtime that can load WASM.
+
+Start here:
+
+- [JavaScript overview](/docs/javascript)
+- [WASM Usage](/docs/wasm-usage)
+
+### Rust
+
+Use Rust when you want the underlying runtime, workspace crates, or contributor build flow.
+
+Start here:
+
+- [Rust overview](/docs/rust)
+- [Build from Source](/docs/build-from-source)
