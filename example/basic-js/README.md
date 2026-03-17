@@ -1,70 +1,72 @@
-# Getting Started with Create React App
+# basic-js
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+This example shows how to create an `EnkiJsAgent` in a React app and call a JavaScript-managed LLM from the browser.
 
-## Available Scripts
+The relevant files are:
 
-In the project directory, you can run:
+- [`src/App.js`](/I:/projects/enki/core-next/example/basic-js/src/App.js): React example that creates, runs, and frees the agent
+- [`../../crates/bindings/enki-js/examples/basic.mjs`](/I:/projects/enki/core-next/crates/bindings/enki-js/examples/basic.mjs): minimal ESM example without React
+- [`../../crates/bindings/enki-js/src/lib.rs`](/I:/projects/enki/core-next/crates/bindings/enki-js/src/lib.rs): Rust crate entrypoint for the WASM binding
 
-### `npm start`
+## Run the example
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+1. Install dependencies:
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+```bash
+npm install
+```
 
-### `npm test`
+2. Set your API key in `.env.local`:
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+```bash
+REACT_APP_GOOGLE_API_KEY=your-key-here
+```
 
-### `npm run build`
+3. Start the dev server:
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+```bash
+npm start
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Agent creation flow
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+[`src/App.js`](/I:/projects/enki/core-next/example/basic-js/src/App.js) follows this sequence:
 
-### `npm run eject`
+1. Import `EnkiJsAgent` from `enki-js`.
+2. Define a model string such as `google::gemini-3.1-pro-preview`.
+3. Convert Enki messages into the target provider payload format.
+4. Implement `llmHandler` to call Google AI Studio with `fetch`.
+5. Create `new EnkiJsAgent(...)` with no tools: `toolHandler = null`, `tools = []`.
+6. Call `await agent.ready()` after construction.
+7. Run prompts with `await agent.run(sessionId, prompt)`.
+8. Call `agent.free()` when the component unmounts.
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+## Notes
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+- Session history is stored in memory for the lifetime of the agent instance.
+- The browser host is responsible for authentication and network requests.
+- [`lib.rs`](/I:/projects/enki/core-next/crates/bindings/enki-js/src/lib.rs) only re-exports the WASM module. The binding logic itself lives in `crates/bindings/enki-js/src/wasm.rs`.
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+## Tool calling pattern
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+To add tool calling in the browser example:
 
-## Learn More
+1. Pass a `toolHandler` function as the sixth `EnkiJsAgent` constructor argument.
+2. Pass tool definitions as the seventh argument.
+3. Make your `llmHandler` return `{ content, tool_calls }` when it wants the runtime to execute a tool.
+4. Handle the tool name and arguments inside `toolHandler`, then return a string result.
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+Minimal shape:
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+```js
+const toolHandler = async ({ tool, args }) => {
+  if (tool === "echo") {
+    return `echo:${args.value}`;
+  }
+  return `Unknown tool: ${tool}`;
+};
+```
 
-### Code Splitting
+## Memory pattern
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+There is no first-class JS memory module yet. For browser apps, keep memory in your app state, `localStorage`, IndexedDB, or your backend, then prepend recalled notes before calling `agent.run()`.

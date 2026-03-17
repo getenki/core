@@ -3,7 +3,7 @@ import init, { EnkiJsAgent } from "../pkg/enki_js.js";
 await init();
 
 const apiKey =
-    process.env.GOOGLE_AI_STUDIO_API_KEY ?? process.env.GEMINI_API_KEY ?? "AIzaSyAZEXZmE9THksdS5_8qtx2QhswgGiu6CxM";
+    process.env.GOOGLE_AI_STUDIO_API_KEY ?? process.env.GEMINI_API_KEY ?? "";
 
 if (!apiKey) {
     throw new Error(
