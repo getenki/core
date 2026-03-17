@@ -17,7 +17,7 @@ The current WASM binding is intentionally browser-safe:
 ## Build
 
 ```powershell
-wasm-pack build --target bundler --out-dir pkg
+wasm-pack build --target web --out-dir pkg
 ```
 
 ## Example
