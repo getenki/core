@@ -6,15 +6,47 @@ import enki_py.agent as agent_module
 class FakeEnkiAgent:
     last_kwargs = None
 
-    def __init__(self, handler):
+    def __init__(self, handler=None, llm_handler=None):
         self.handler = handler
+        self.llm_handler = llm_handler
 
     @classmethod
     def with_tools(cls, **kwargs):
         cls.last_kwargs = kwargs
         return cls(kwargs["handler"])
 
+    @classmethod
+    def with_llm(cls, **kwargs):
+        cls.last_kwargs = kwargs
+        return cls(llm_handler=kwargs["llm_handler"])
+
+    @classmethod
+    def with_tools_and_llm(cls, **kwargs):
+        cls.last_kwargs = kwargs
+        return cls(kwargs["handler"], kwargs["llm_handler"])
+
+    @classmethod
+    def with_memory_and_llm(cls, **kwargs):
+        cls.last_kwargs = kwargs
+        return cls(llm_handler=kwargs["llm_handler"])
+
+    @classmethod
+    def with_tools_memory_and_llm(cls, **kwargs):
+        cls.last_kwargs = kwargs
+        return cls(kwargs["tool_handler"], kwargs["llm_handler"])
+
     async def run(self, session_id: str, user_message: str) -> str:
+        if self.llm_handler is not None:
+            raw = self.llm_handler.complete(
+                FakeEnkiAgent.last_kwargs["model"],
+                json.dumps([{"role": "user", "content": user_message}]),
+                json.dumps([]),
+            )
+            payload = json.loads(raw) if raw.startswith("{") else raw
+            if isinstance(payload, dict):
+                return payload["content"]
+            return payload
+
         tool_names = {tool.name for tool in self.last_kwargs["tools"]}
         if {"get_player_name", "roll_dice"}.issubset(tool_names):
             guess = "".join(ch for ch in user_message if ch.isdigit())
@@ -138,3 +170,19 @@ def test_wrapper_registers_concrete_tool_objects(monkeypatch):
 
     handler = FakeEnkiAgent.last_kwargs["handler"]
     assert handler.execute("format_score", json.dumps({"total": 7}), "", "", "") == "score:7"
+
+
+def test_wrapper_supports_custom_llm_provider(monkeypatch):
+    monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
+
+    class DemoProvider(agent_module.LlmProviderBackend):
+        def complete(self, model: str, messages, tools):
+            assert model == "demo-model"
+            assert messages[-1]["content"] == "hello"
+            assert tools == []
+            return {"content": "provider response"}
+
+    agent = agent_module.Agent("demo-model", llm=DemoProvider())
+    result = agent.run_sync("hello")
+
+    assert result.output == "provider response"
