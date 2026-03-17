@@ -1,6 +1,6 @@
 [package]
 name = "enki-js"
-version.workspace = true
+version = "0.1.5"
 edition.workspace = true
 description = "WASM-powered JavaScript bindings for Enki"
 license = "Apache-2.0"
