@@ -1,7 +1,7 @@
 name: CI-JS
 env:
   DEBUG: napi:*
-  APP_NAME: enki-js
+  APP_NAME: enki-ai
   MACOSX_DEPLOYMENT_TARGET: '10.13'
   CARGO_INCREMENTAL: '1'
 'on':

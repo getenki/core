@@ -1,87 +1,170 @@
-# `@napi-rs/package-template`
+# `enki-ai`
 
-![https://github.com/napi-rs/package-template/actions](https://github.com/napi-rs/package-template/workflows/CI/badge.svg)
+JavaScript bindings for Enki's Rust agent runtime, published as a native Node.js package via `napi-rs`.
 
-> Template project for writing node packages with napi-rs.
-
-# Usage
-
-1. Click **Use this template**.
-2. **Clone** your project.
-3. Run `yarn install` to install dependencies.
-4. Run `yarn napi rename -n [@your-scope/package-name] -b [binary-name]` command under the project folder to rename your package.
-
-## Install this test package
+## Install
 
 ```bash
-yarn add @napi-rs/package-template
+npm install enki-ai
 ```
 
-## Ability
+The package ships prebuilt native binaries for:
 
-### Build
+- Windows x64 and arm64
+- macOS x64 and arm64
+- Linux x64 and arm64 (GNU libc)
 
-After `yarn build/npm run build` command, you can see `package-template.[darwin|win32|linux].node` file in project root. This is the native addon built from [lib.rs](./src/lib.rs).
+## API
 
-### Test
+The package exposes two layers:
 
-With [ava](https://github.com/avajs/ava), run `yarn test/npm run test` to testing native addon. You can also switch to another testing framework if you want.
+- `EnkiAgent`: thin wrapper over the native runtime
+- `Agent`: higher-level JavaScript wrapper for tools, memories, and custom LLM providers
 
-### CI
+It also exports `NativeEnkiAgent`, `Tool`, `MemoryModule`, `MemoryBackend`, `LlmProviderBackend`, `RunContext`, and `AgentRunResult`.
 
-With GitHub Actions, each commit and pull request will be built and tested automatically in [`node@20`, `@node22`] x [`macOS`, `Linux`, `Windows`] matrix. You will never be afraid of the native addon broken in these platforms.
+## `EnkiAgent`
 
-### Release
+Use `EnkiAgent` when you want a simple session-oriented interface backed directly by the native runtime.
 
-Release native package is very difficult in old days. Native packages may ask developers who use it to install `build toolchain` like `gcc/llvm`, `node-gyp` or something more.
+```js
+const { EnkiAgent } = require('enki-ai')
 
-With `GitHub actions`, we can easily prebuild a `binary` for major platforms. And with `N-API`, we should never be afraid of **ABI Compatible**.
+async function main() {
+  const agent = new EnkiAgent({
+    name: 'Assistant',
+    systemPromptPreamble: 'Answer clearly and keep responses short.',
+    model: 'ollama::llama3.2:latest',
+    maxIterations: 20,
+    workspaceHome: process.cwd(),
+  })
 
-The other problem is how to deliver prebuild `binary` to users. Downloading it in `postinstall` script is a common way that most packages do it right now. The problem with this solution is it introduced many other packages to download binary that has not been used by `runtime codes`. The other problem is some users may not easily download the binary from `GitHub/CDN` if they are behind a private network (But in most cases, they have a private NPM mirror).
+  const output = await agent.run('session-1', 'Explain what this project does.')
+  console.log(output)
+}
 
-In this package, we choose a better way to solve this problem. We release different `npm packages` for different platforms. And add it to `optionalDependencies` before releasing the `Major` package to npm.
+main().catch(console.error)
+```
 
-`NPM` will choose which native package should download from `registry` automatically. You can see [npm](./npm) dir for details. And you can also run `yarn add @napi-rs/package-template` to see how it works.
+Constructor options:
 
-## Develop requirements
+- `name?: string`
+- `systemPromptPreamble?: string`
+- `model?: string`
+- `maxIterations?: number`
+- `workspaceHome?: string`
 
-- Install the latest `Rust`
-- Install `Node.js@10+` which fully supported `Node-API`
-- Install `yarn@1.x`
+## `Agent`
 
-## Test in local
+Use `Agent` when you want to register JavaScript tools or plug in your own LLM provider.
 
-- yarn
-- yarn build
-- yarn test
+```js
+const { Agent } = require('enki-ai')
 
-And you will see:
+async function main() {
+  const agent = new Agent('demo-model', {
+    instructions: 'You are a dice game.',
+    workspaceHome: process.cwd(),
+  })
+
+  agent.toolPlain(
+    function rollDice() {
+      return '4'
+    },
+    {
+      description: 'Roll a six-sided die and return the result.',
+      parametersJson: JSON.stringify({
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      }),
+    },
+  )
+
+  const result = await agent.run('My guess is 4', {
+    sessionId: 'session-tools-1',
+  })
+
+  console.log(result.output)
+}
+
+main().catch(console.error)
+```
+
+### Context-aware tools
+
+`agent.tool()` injects a `RunContext` as the first argument so your tool can access runtime dependencies.
+
+```js
+const { Agent } = require('enki-ai')
+
+const agent = new Agent('demo-model')
+
+agent.tool(
+  function getPlayerName(ctx) {
+    return ctx.deps.playerName
+  },
+  {
+    description: "Get the player's name.",
+    parametersJson: JSON.stringify({
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    }),
+  },
+)
+```
+
+Then pass dependencies at run time:
+
+```js
+const result = await agent.run('Say hello.', {
+  sessionId: 'session-ctx-1',
+  deps: { playerName: 'Anne' },
+})
+```
+
+## Custom LLM providers
+
+Pass either a subclass of `LlmProviderBackend` or a function through the `llm` option.
+
+```js
+const { Agent, LlmProviderBackend } = require('enki-ai')
+
+class DemoProvider extends LlmProviderBackend {
+  complete(model, messages, tools) {
+    return {
+      model,
+      content: `Received ${messages.length} message(s) and ${tools.length} tool(s).`,
+    }
+  }
+}
+
+const agent = new Agent('demo-model', {
+  llm: new DemoProvider(),
+})
+```
+
+## Development
+
+From [`crates/bindings/enki-js`](/I:/projects/enki/core-next/crates/bindings/enki-js):
 
 ```bash
-$ ava --verbose
-
-  ✔ sync function from native code
-  ✔ sleep function from native code (201ms)
-  ─
-
-  2 tests passed
-✨  Done in 1.12s.
+yarn install
+yarn build
+yarn test
 ```
 
-## Release package
+Useful scripts:
 
-Ensure you have set your **NPM_TOKEN** in the `GitHub` project setting.
+- `yarn build`: build the native addon in release mode
+- `yarn build:debug`: build without release optimizations
+- `yarn test`: run the AVA test suite
+- `yarn lint`: run `oxlint`
+- `yarn format`: run Prettier, `cargo fmt`, and `taplo format`
 
-In `Settings -> Secrets`, add **NPM_TOKEN** into it.
+## Notes
 
-When you want to release the package:
-
-```bash
-npm version [<newversion> | major | minor | patch | premajor | preminor | prepatch | prerelease [--preid=<prerelease-id>] | from-git]
-
-git push
-```
-
-GitHub actions will do the rest job for you.
-
-> WARN: Don't run `npm publish` manually.
+- `Agent` can register tools, memories, and custom LLM providers in JavaScript.
+- The default native constructor uses `20` max iterations when none is provided.
+- `workspaceHome` lets you control where the runtime creates and resolves workspace state.
