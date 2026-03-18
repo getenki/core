@@ -1,5 +1,5 @@
 {
-  "name": "enki-ai",
+  "name": "@getenki/ai",
   "version": "0.1.91",
   "description": "Template project for writing node package with napi-rs",
   "main": "client.js",
@@ -110,11 +110,11 @@
   },
   "packageManager": "yarn@4.12.0",
   "optionalDependencies": {
-    "enki-ai-win32-x64-msvc": "0.1.9",
-    "enki-ai-win32-arm64-msvc": "0.1.9",
-    "enki-ai-darwin-x64": "0.1.9",
-    "enki-ai-darwin-arm64": "0.1.9",
-    "enki-ai-linux-x64-gnu": "0.1.9",
-    "enki-ai-linux-arm64-gnu": "0.1.9"
+    "@getenki/ai-win32-x64-msvc": "0.1.9",
+    "@getenki/ai-win32-arm64-msvc": "0.1.9",
+    "@getenki/ai-darwin-x64": "0.1.9",
+    "@getenki/ai-darwin-arm64": "0.1.9",
+    "@getenki/ai-linux-x64-gnu": "0.1.9",
+    "@getenki/ai-linux-arm64-gnu": "0.1.9"
   }
 }

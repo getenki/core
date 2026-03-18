@@ -1,11 +1,11 @@
-# `enki-ai`
+# `@getenki/ai`
 
 JavaScript bindings for Enki's Rust agent runtime, published as a native Node.js package via `napi-rs`.
 
 ## Install
 
 ```bash
-npm install enki-ai
+npm install @getenki/ai
 ```
 
 The package ships prebuilt native binaries for:
@@ -28,7 +28,7 @@ It also exports `NativeEnkiAgent`, `Tool`, `MemoryModule`, `MemoryBackend`, `Llm
 Use `EnkiAgent` when you want a simple session-oriented interface backed directly by the native runtime.
 
 ```js
-const { EnkiAgent } = require('enki-ai')
+const { EnkiAgent } = require('@getenki/ai')
 
 async function main() {
   const agent = new EnkiAgent({
@@ -59,7 +59,7 @@ Constructor options:
 Use `Agent` when you want to register JavaScript tools or plug in your own LLM provider.
 
 ```js
-const { Agent } = require('enki-ai')
+const { Agent } = require('@getenki/ai')
 
 async function main() {
   const agent = new Agent('demo-model', {
@@ -96,7 +96,7 @@ main().catch(console.error)
 `agent.tool()` injects a `RunContext` as the first argument so your tool can access runtime dependencies.
 
 ```js
-const { Agent } = require('enki-ai')
+const { Agent } = require('@getenki/ai')
 
 const agent = new Agent('demo-model')
 
@@ -129,7 +129,7 @@ const result = await agent.run('Say hello.', {
 Pass either a subclass of `LlmProviderBackend` or a function through the `llm` option.
 
 ```js
-const { Agent, LlmProviderBackend } = require('enki-ai')
+const { Agent, LlmProviderBackend } = require('@getenki/ai')
 
 class DemoProvider extends LlmProviderBackend {
   complete(model, messages, tools) {
