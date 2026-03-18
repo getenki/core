@@ -57,6 +57,21 @@ jobs:
           - host: windows-latest
             build: yarn build --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
+          - host: windows-latest
+            build: yarn build --target aarch64-pc-windows-msvc
+            target: aarch64-pc-windows-msvc
+          - host: macos-13
+            build: yarn build --target x86_64-apple-darwin
+            target: x86_64-apple-darwin
+          - host: macos-14
+            build: yarn build --target aarch64-apple-darwin
+            target: aarch64-apple-darwin
+          - host: ubuntu-24.04
+            build: yarn build --target x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-gnu
+          - host: ubuntu-24.04-arm
+            build: yarn build --target aarch64-unknown-linux-gnu
+            target: aarch64-unknown-linux-gnu
     name: stable - ${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -113,7 +128,7 @@ jobs:
             crates/bindings/enki-js/${{ env.APP_NAME }}.*.node
             crates/bindings/enki-js/${{ env.APP_NAME }}.*.wasm
           if-no-files-found: error
-  test-macOS-windows-binding:
+  test-bindings:
     name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
     needs:
       - build
@@ -124,6 +139,18 @@ jobs:
           - host: windows-latest
             target: x86_64-pc-windows-msvc
             architecture: x64
+          - host: macos-13
+            target: x86_64-apple-darwin
+            architecture: x64
+          - host: macos-14
+            target: aarch64-apple-darwin
+            architecture: arm64
+          - host: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            architecture: x64
+          - host: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            architecture: arm64
         node:
           - '20'
           - '22'
@@ -159,7 +186,7 @@ jobs:
       id-token: write
     needs:
       - lint
-      - test-macOS-windows-binding
+      - test-bindings
     steps:
       - uses: actions/checkout@v6
       - name: Setup node
