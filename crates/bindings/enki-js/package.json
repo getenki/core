@@ -1,6 +1,6 @@
 {
   "name": "enki-ai",
-  "version": "0.1.9",
+  "version": "0.1.90",
   "description": "Template project for writing node package with napi-rs",
   "main": "client.js",
   "types": "client.d.ts",
