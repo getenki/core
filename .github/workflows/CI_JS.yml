@@ -181,7 +181,7 @@ jobs:
     if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
     environment:
       name: npm-node
-      url: https://www.npmjs.com/package/enki-js
+      url: https://www.npmjs.com/package/enki-ai
     permissions:
       contents: write
       id-token: write
