@@ -26,7 +26,7 @@
     "browser.js"
   ],
   "napi": {
-    "binaryName": "enki-js",
+    "binaryName": "enki-ai",
     "targets": [
       "x86_64-pc-windows-msvc",
       "aarch64-pc-windows-msvc",
