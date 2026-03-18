@@ -194,18 +194,19 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+          registry-url: https://registry.npmjs.org/
           cache: yarn
           cache-dependency-path: crates/bindings/enki-js/yarn.lock
       - name: Backup package manifest
-        run: Copy-Item package.json package.json.ci-backup
-        shell: pwsh
+        run: cp package.json package.json.ci-backup
+        shell: bash
       - name: Remove unpublished optional native packages for CI
         run: npm pkg delete optionalDependencies
       - name: Install dependencies
         run: yarn install --no-immutable
       - name: Restore package manifest
-        run: Move-Item -Force package.json.ci-backup package.json
-        shell: pwsh
+        run: mv -f package.json.ci-backup package.json
+        shell: bash
       - name: create npm dirs
         run: yarn napi create-npm-dirs
       - name: Download all artifacts
@@ -217,10 +218,11 @@ jobs:
       - name: List packages
         run: ls -R ./npm
         shell: bash
+      - name: Prepare packages for npm publish
+        run: yarn napi prepublish -t npm --no-gh-release
       - name: Publish
         run: |
           npm config set provenance true
-          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
 
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             npm publish --tag next --access public
@@ -232,7 +234,7 @@ jobs:
             echo "Tag ${GITHUB_REF_NAME} is not a publishable release, skipping publish"
           fi
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
