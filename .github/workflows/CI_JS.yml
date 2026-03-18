@@ -60,9 +60,6 @@ jobs:
           - host: windows-latest
             build: yarn build --target aarch64-pc-windows-msvc
             target: aarch64-pc-windows-msvc
-          - host: macos-13
-            build: yarn build --target x86_64-apple-darwin
-            target: x86_64-apple-darwin
           - host: macos-14
             build: yarn build --target aarch64-apple-darwin
             target: aarch64-apple-darwin
@@ -138,9 +135,6 @@ jobs:
         settings:
           - host: windows-latest
             target: x86_64-pc-windows-msvc
-            architecture: x64
-          - host: macos-13
-            target: x86_64-apple-darwin
             architecture: x64
           - host: macos-14
             target: aarch64-apple-darwin
