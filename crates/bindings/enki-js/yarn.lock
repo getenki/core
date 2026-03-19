@@ -24,6 +24,11 @@
   dependencies:
     tslib "^2.4.0"
 
+"@getenki/ai-win32-x64-msvc@0.1.92":
+  version "0.1.92"
+  resolved "https://registry.npmjs.org/@getenki/ai-win32-x64-msvc/-/ai-win32-x64-msvc-0.1.92.tgz"
+  integrity sha512-zFewDoUTrzlBfGjTw3FfJNK5CA62fo8PmvTZPZXht8l3MTN/PMCS0ZSpcog8/p8dPKsHUoCRRhPR5syChyOi1w==
+
 "@inquirer/ansi@^2.0.4":
   version "2.0.4"
   resolved "https://registry.npmjs.org/@inquirer/ansi/-/ansi-2.0.4.tgz"
