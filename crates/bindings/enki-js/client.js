@@ -591,17 +591,15 @@ function stringifyToolResult(value) {
   return JSON.stringify(value)
 }
 
-module.exports = {
-  Agent,
-  AgentRunResult,
-  EnkiAgent,
-  LlmProviderBackend,
-  MemoryBackend,
-  MemoryModule,
-  NativeEnkiAgent: undefined,
-  RunContext,
-  Tool,
-}
+module.exports.Agent = Agent
+module.exports.AgentRunResult = AgentRunResult
+module.exports.EnkiAgent = EnkiAgent
+module.exports.LlmProviderBackend = LlmProviderBackend
+module.exports.MemoryBackend = MemoryBackend
+module.exports.MemoryModule = MemoryModule
+module.exports.NativeEnkiAgent = undefined
+module.exports.RunContext = RunContext
+module.exports.Tool = Tool
 
 Object.defineProperty(module.exports, 'NativeEnkiAgent', {
   configurable: true,
