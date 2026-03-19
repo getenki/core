@@ -225,11 +225,11 @@ jobs:
           npm config set provenance true
 
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            npm publish --tag next --access public
+            npm publish --ignore-scripts --tag next --access public
           elif echo "${GITHUB_REF_NAME}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            npm publish --access public
+            npm publish --ignore-scripts --access public
           elif echo "${GITHUB_REF_NAME}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
-            npm publish --tag next --access public
+            npm publish --ignore-scripts --tag next --access public
           else
             echo "Tag ${GITHUB_REF_NAME} is not a publishable release, skipping publish"
           fi
