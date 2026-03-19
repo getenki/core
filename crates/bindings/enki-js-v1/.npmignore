@@ -1,7 +1,0 @@
-%APPDATA%/
-examples/basic/%APPDATA%/
-examples/basic/node_modules/
-examples/basic/build/
-examples/basic/public/wasm/
-pkg/
-pkg-web/
