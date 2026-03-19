@@ -598,6 +598,7 @@ module.exports = {
   LlmProviderBackend,
   MemoryBackend,
   MemoryModule,
+  NativeEnkiAgent: undefined,
   RunContext,
   Tool,
 }
