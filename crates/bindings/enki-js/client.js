@@ -13,6 +13,38 @@ function getNativeEnkiAgent() {
   return loadNativeBinding().NativeEnkiAgent
 }
 
+class NativeEnkiAgent {
+  constructor(...args) {
+    return Reflect.construct(getNativeEnkiAgent(), args, new.target)
+  }
+}
+
+for (const methodName of [
+  'withToolsMemoryAndLlm',
+  'with_tools_memory_and_llm',
+  'withToolsAndLlm',
+  'with_tools_and_llm',
+  'withMemoryAndLlm',
+  'with_memory_and_llm',
+  'withLlm',
+  'with_llm',
+  'withToolsAndMemory',
+  'with_tools_and_memory',
+  'withTools',
+  'with_tools',
+  'withMemory',
+  'with_memory',
+]) {
+  Object.defineProperty(NativeEnkiAgent, methodName, {
+    configurable: true,
+    enumerable: false,
+    get() {
+      const nativeMethod = getNativeEnkiAgent()[methodName]
+      return typeof nativeMethod === 'function' ? nativeMethod.bind(getNativeEnkiAgent()) : undefined
+    },
+  })
+}
+
 const DEFAULT_AGENT_NAME = 'Agent'
 const DEFAULT_MAX_ITERATIONS = 20
 
@@ -465,13 +497,7 @@ class Agent {
   }
 }
 
-Object.defineProperty(Agent, '_LowLevelEnkiAgent', {
-  configurable: true,
-  enumerable: true,
-  get() {
-    return getNativeEnkiAgent()
-  },
-})
+Agent._LowLevelEnkiAgent = NativeEnkiAgent
 
 function requiredString(value, field) {
   if (typeof value !== 'string' || value.length === 0) {
@@ -597,14 +623,6 @@ module.exports.EnkiAgent = EnkiAgent
 module.exports.LlmProviderBackend = LlmProviderBackend
 module.exports.MemoryBackend = MemoryBackend
 module.exports.MemoryModule = MemoryModule
-module.exports.NativeEnkiAgent = undefined
+module.exports.NativeEnkiAgent = NativeEnkiAgent
 module.exports.RunContext = RunContext
 module.exports.Tool = Tool
-
-Object.defineProperty(module.exports, 'NativeEnkiAgent', {
-  configurable: true,
-  enumerable: true,
-  get() {
-    return getNativeEnkiAgent()
-  },
-})
