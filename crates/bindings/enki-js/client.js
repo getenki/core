@@ -1,6 +1,17 @@
 'use strict'
 
-const { NativeEnkiAgent, ...nativeBinding } = require('./index.js')
+let cachedNativeBinding = null
+
+function loadNativeBinding() {
+  if (cachedNativeBinding == null) {
+    cachedNativeBinding = require('./index.js')
+  }
+  return cachedNativeBinding
+}
+
+function getNativeEnkiAgent() {
+  return loadNativeBinding().NativeEnkiAgent
+}
 
 const DEFAULT_AGENT_NAME = 'Agent'
 const DEFAULT_MAX_ITERATIONS = 20
@@ -18,6 +29,8 @@ class EnkiAgent {
       maxIterations,
       workspaceHome,
     } = options
+
+    const NativeEnkiAgent = getNativeEnkiAgent()
 
     this._native = new NativeEnkiAgent(
       optionalString(name, 'name'),
@@ -452,7 +465,13 @@ class Agent {
   }
 }
 
-Agent._LowLevelEnkiAgent = NativeEnkiAgent
+Object.defineProperty(Agent, '_LowLevelEnkiAgent', {
+  configurable: true,
+  enumerable: true,
+  get() {
+    return getNativeEnkiAgent()
+  },
+})
 
 function requiredString(value, field) {
   if (typeof value !== 'string' || value.length === 0) {
@@ -572,15 +591,20 @@ function stringifyToolResult(value) {
   return JSON.stringify(value)
 }
 
-module.exports = {
-  ...nativeBinding,
-  Agent,
-  AgentRunResult,
-  EnkiAgent,
-  LlmProviderBackend,
-  MemoryBackend,
-  MemoryModule,
-  NativeEnkiAgent,
-  RunContext,
-  Tool,
-}
+module.exports.Agent = Agent
+module.exports.AgentRunResult = AgentRunResult
+module.exports.EnkiAgent = EnkiAgent
+module.exports.LlmProviderBackend = LlmProviderBackend
+module.exports.MemoryBackend = MemoryBackend
+module.exports.MemoryModule = MemoryModule
+module.exports.NativeEnkiAgent = undefined
+module.exports.RunContext = RunContext
+module.exports.Tool = Tool
+
+Object.defineProperty(module.exports, 'NativeEnkiAgent', {
+  configurable: true,
+  enumerable: true,
+  get() {
+    return getNativeEnkiAgent()
+  },
+})

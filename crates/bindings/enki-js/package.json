@@ -1,6 +1,6 @@
 {
   "name": "@getenki/ai",
-  "version": "0.1.92",
+  "version": "0.2.0",
   "description": "Template project for writing node package with napi-rs",
   "main": "client.js",
   "types": "client.d.ts",
@@ -24,7 +24,8 @@
     "client.js",
     "index.d.ts",
     "index.js",
-    "browser.js"
+    "browser.js",
+    "*.node"
   ],
   "napi": {
     "binaryName": "enki-ai",
