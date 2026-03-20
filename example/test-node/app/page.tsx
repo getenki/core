@@ -1,4 +1,10 @@
+import { NativeEnkiAgent } from "@getenki/ai";
 import { redirect } from "next/navigation";
+
+const DEFAULT_MODEL = "ollama::llama3.2:latest";
+const DEFAULT_PROMPT = "Explain what this project does.";
+const DEFAULT_SYSTEM_PROMPT = "Answer clearly and keep responses short.";
+const DEFAULT_MAX_ITERATIONS = 20;
 
 type PageProps = {
   searchParams: Promise<{
@@ -6,18 +12,6 @@ type PageProps = {
     response?: string;
     error?: string;
   }>;
-};
-
-type EnkiModule = {
-  EnkiAgent: new (options?: {
-    name?: string;
-    systemPromptPreamble?: string;
-    model?: string;
-    maxIterations?: number;
-    workspaceHome?: string;
-  }) => {
-    run(sessionId: string, userMessage: string): Promise<string>;
-  };
 };
 
 function firstParam(value?: string | string[]) {
@@ -30,7 +24,7 @@ function firstParam(value?: string | string[]) {
 
 export default async function Home({ searchParams }: PageProps) {
   const params = await searchParams;
-  const prompt = firstParam(params.prompt) || "Explain what this project does.";
+  const prompt = firstParam(params.prompt) || DEFAULT_PROMPT;
   const response = firstParam(params.response);
   const error = firstParam(params.error);
 
@@ -44,17 +38,15 @@ export default async function Home({ searchParams }: PageProps) {
     }
 
     try {
-      const { createRequire } = await import("node:module");
-      const require = createRequire(process.cwd() + "/");
-      const packageName = "@getenki/" + "ai";
-      const { EnkiAgent } = require(packageName) as EnkiModule;
+      const model = (process.env.ENKI_MODEL ?? DEFAULT_MODEL).trim();
 
-      const agent = new EnkiAgent({
-        model: process.env.ENKI_MODEL ?? "ollama::llama3.2:latest",
-        systemPromptPreamble:
-          "Answer clearly and keep responses short. Mention uncertainty when needed.",
-        workspaceHome: process.cwd(),
-      });
+      const agent = new NativeEnkiAgent(
+        "Agent",
+        DEFAULT_SYSTEM_PROMPT,
+        model,
+        DEFAULT_MAX_ITERATIONS,
+        process.cwd(),
+      );
 
       const output = await agent.run("next-server-action-demo", prompt);
       const nextParams = new URLSearchParams({

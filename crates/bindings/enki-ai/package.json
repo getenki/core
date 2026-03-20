@@ -1,16 +1,15 @@
 {
-  "name": "@getenki/ai",
-  "version": "0.2.0",
+  "name": "enki-ai",
+  "version": "1.0.0",
   "description": "Template project for writing node package with napi-rs",
   "main": "index.js",
-  "types": "index.d.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/getenki/core.git"
+    "url": "git+ssh://git@github.com/napi-rs/package-template.git"
   },
-  "license": " Apache License V2",
+  "license": "MIT",
+  "browser": "browser.js",
   "keywords": [
-    "napi-rs",
     "napi-rs",
     "NAPI",
     "N-API",
@@ -21,17 +20,12 @@
   "files": [
     "index.d.ts",
     "index.js",
-    "*.node"
+    "browser.js"
   ],
   "napi": {
     "binaryName": "enki-ai",
     "targets": [
-      "x86_64-pc-windows-msvc",
-      "aarch64-pc-windows-msvc",
-      "x86_64-apple-darwin",
-      "aarch64-apple-darwin",
-      "x86_64-unknown-linux-gnu",
-      "aarch64-unknown-linux-gnu"
+      "aarch64-apple-darwin"
     ]
   },
   "engines": {
@@ -51,7 +45,7 @@
     "format:toml": "taplo format",
     "format:rs": "cargo fmt",
     "lint": "oxlint .",
-    "prepublishOnly": "napi prepublish -t npm && node scripts/fix-generated-platform-packages.js",
+    "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
     "preversion": "napi build --platform && git add .",
     "version": "napi version",
@@ -106,13 +100,5 @@
     "singleQuote": true,
     "arrowParens": "always"
   },
-  "packageManager": "yarn@4.12.0",
-  "optionalDependencies": {
-    "@getenki/ai-win32-x64-msvc": "0.2.0",
-    "@getenki/ai-win32-arm64-msvc": "0.2.0",
-    "@getenki/ai-darwin-x64": "0.2.0",
-    "@getenki/ai-darwin-arm64": "0.2.0",
-    "@getenki/ai-linux-x64-gnu": "0.2.0",
-    "@getenki/ai-linux-arm64-gnu": "0.2.0"
-  }
+  "packageManager": "yarn@4.12.0"
 }

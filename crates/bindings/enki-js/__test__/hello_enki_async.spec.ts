@@ -1,56 +1,31 @@
 import test from 'ava'
 
-import {Agent, EnkiAgent} from '../client'
+import {NativeEnkiAgent} from '../index.js'
 
 const testWithOllama = process.env.ENKI_RUN_OLLAMA_TESTS === '1' ? test : test.skip
 
-test('hello_enki_async: supports awaited async runs', async (t) => {
-  const agent = Object.create(EnkiAgent.prototype) as EnkiAgent & {
-    _native: {
-      run: (sessionId: string, userMessage: string) => Promise<string>
-    }
-  }
+test('hello_enki_async: run returns a promise', (t) => {
+  const agent = new NativeEnkiAgent(
+    'Agent',
+    'Answer clearly and keep responses short.',
+    'ollama::llama3.2:latest',
+    20,
+  )
 
-  agent._native = {
-    run: async (sessionId, userMessage) => {
-      t.is(sessionId, 'hello-enki')
-      t.is(userMessage, 'Explain what this project does.')
-      return 'Enki helps build and run coding agents.'
-    },
-  }
+  const result = agent.run('hello-enki-async', 'Explain what this project does.')
 
-  const result = await agent.run('hello-enki', 'Explain what this project does.')
-
-  t.is(result, 'Enki helps build and run coding agents.')
+  t.is(typeof result.then, 'function')
 })
 
-test('hello_enki_async: high-level Agent awaits async low-level runs', async (t) => {
-  class FakeLowLevelAgent {
-    async run(sessionId: string, userMessage: string) {
-      t.is(sessionId, 'hello-enki-async-wrapper')
-      t.is(userMessage, 'Explain what this project does.')
-      return 'async wrapper response'
-    }
-  }
-
-  const agent = new Agent('ollama::llama3.2:latest', {
-    lowLevelAgent: FakeLowLevelAgent,
-  })
-
-  const result = await agent.run('Explain what this project does.', {
-    sessionId: 'hello-enki-async-wrapper',
-  })
-
-  t.is(result.output, 'async wrapper response')
-})
-
-testWithOllama('hello_enki_async: runs against Ollama when enabled', async (t) => {
+testWithOllama('hello_enki_async: awaited runs resolve to text', async (t) => {
   t.timeout(10 * 60 * 1000)
 
-  const agent = new EnkiAgent({
-    model: 'ollama::llama3.2:latest',
-    systemPromptPreamble: 'Answer clearly and keep responses short.',
-  })
+  const agent = new NativeEnkiAgent(
+    'Agent',
+    'Answer clearly and keep responses short.',
+    'ollama::llama3.2:latest',
+    20,
+  )
 
   const result = await agent.run('hello-enki-async', 'Explain what this project does.')
 
