@@ -2,24 +2,30 @@ const {JsMemoryKind, NativeEnkiAgent} = require('@getenki/ai')
 
 const tools = [
     {
-        name: 'calculate_sum',
+        id: 'calculate_sum',
         description: 'Add two numbers and return a short text result.',
-        parametersJson: JSON.stringify({
+        inputSchema: {
             type: 'object',
             properties: {
                 a: {type: 'number'},
                 b: {type: 'number'},
             },
             required: ['a', 'b'],
-        }),
+        },
+        execute: (inputJson) => {
+            const args = inputJson ? JSON.parse(inputJson) : {}
+            const result = Number(args.a) + Number(args.b)
+            return JSON.stringify({result, text: `${args.a} + ${args.b} = ${result}`})
+        },
     },
     {
-        name: 'get_today',
+        id: 'get_today',
         description: 'Return the current local date in ISO format.',
-        parametersJson: JSON.stringify({
+        inputSchema: {
             type: 'object',
             properties: {},
-        }),
+        },
+        execute: () => JSON.stringify({today: new Date().toISOString().slice(0, 10)}),
     },
 ]
 
@@ -62,20 +68,7 @@ async function main() {
         20,
         process.cwd(),
         tools,
-        (toolName, argsJson) => {
-            const args = argsJson ? JSON.parse(argsJson) : {}
-
-            if (toolName === 'calculate_sum') {
-                const result = Number(args.a) + Number(args.b)
-                return JSON.stringify({result, text: `${args.a} + ${args.b} = ${result}`})
-            }
-
-            if (toolName === 'get_today') {
-                return JSON.stringify({today: new Date().toISOString().slice(0, 10)})
-            }
-
-            return `Unknown tool: ${toolName}`
-        },
+        null,
         memories,
         (memoryName, sessionId, userMsg, assistantMsg) => {
             const entries = getMemoryEntries(memoryName, sessionId)
