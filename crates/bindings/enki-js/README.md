@@ -150,18 +150,18 @@ const agent = new Agent('demo-model', {
 From [`crates/bindings/enki-js`](/I:/projects/enki/core-next/crates/bindings/enki-js):
 
 ```bash
-yarn install
-yarn build
-yarn test
+npm install
+npm run build
+npm test
 ```
 
 Useful scripts:
 
-- `yarn build`: build the native addon in release mode
-- `yarn build:debug`: build without release optimizations
-- `yarn test`: run the AVA test suite
-- `yarn lint`: run `oxlint`
-- `yarn format`: run Prettier, `cargo fmt`, and `taplo format`
+- `npm run build`: build the native addon in release mode
+- `npm run build:debug`: build without release optimizations
+- `npm test`: run the AVA test suite
+- `npm run lint`: run `oxlint`
+- `npm run format`: run Prettier, `cargo fmt`, and `taplo format`
 
 ## Notes
 
