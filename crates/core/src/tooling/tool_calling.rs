@@ -35,7 +35,9 @@ impl ToolCallRegistry {
 
 fn normalize_tool_args(args: &Value) -> Value {
     match args {
-        Value::String(raw) => serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.clone())),
+        Value::String(raw) => {
+            serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.clone()))
+        }
         _ => args.clone(),
     }
 }

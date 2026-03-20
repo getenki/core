@@ -573,26 +573,28 @@ fn build_shared_tool_handler(
 
 fn build_memory_handlers(callbacks: JsMemoryCallbackSet<'_>) -> napi::Result<JsMemoryHandlers> {
   Ok(JsMemoryHandlers {
-    record: callbacks.record.build_threadsafe_function().build_callback(
-      |ctx: ThreadsafeCallContext<MemoryRecordInvocation>| {
+    record: callbacks
+      .record
+      .build_threadsafe_function()
+      .build_callback(|ctx: ThreadsafeCallContext<MemoryRecordInvocation>| {
         Ok(FnArgs::from((
           ctx.value.memory_name,
           ctx.value.session_id,
           ctx.value.user_msg,
           ctx.value.assistant_msg,
         )))
-      },
-    )?,
-    recall: callbacks.recall.build_threadsafe_function().build_callback(
-      |ctx: ThreadsafeCallContext<MemoryRecallInvocation>| {
+      })?,
+    recall: callbacks
+      .recall
+      .build_threadsafe_function()
+      .build_callback(|ctx: ThreadsafeCallContext<MemoryRecallInvocation>| {
         Ok(FnArgs::from((
           ctx.value.memory_name,
           ctx.value.session_id,
           ctx.value.query,
           ctx.value.max_entries,
         )))
-      },
-    )?,
+      })?,
     flush: callbacks.flush.build_threadsafe_function().build_callback(
       |ctx: ThreadsafeCallContext<MemorySessionInvocation>| {
         Ok(FnArgs::from((ctx.value.memory_name, ctx.value.session_id)))
