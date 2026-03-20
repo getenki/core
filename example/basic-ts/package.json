@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@getenki/ai": "^0.2.1"
+    "@getenki/ai": "file:../../crates/bindings/enki-js"
   },
   "devDependencies": {
     "tsx": "^4.20.6",
