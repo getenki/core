@@ -11,6 +11,6 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "@getenki/ai": "^0.2.1"
+    "@getenki/ai": "file:../../crates/bindings/enki-js"
   }
 }

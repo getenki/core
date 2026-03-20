@@ -9,9 +9,11 @@ version.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = { version = "3.0.0", features = ["tokio_rt"] }
+napi = { version = "3.0.0", features = ["tokio_rt", "napi4"] }
 napi-derive = "3.0.0"
 core_next = { package = "core", path = "../../core" }
+async-trait = "0.1"
+serde_json = "1"
 tokio.workspace = true
 
 [build-dependencies]

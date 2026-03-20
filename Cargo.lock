@@ -287,10 +287,12 @@ dependencies = [
 name = "enki_js"
 version = "0.1.3"
 dependencies = [
+ "async-trait",
  "core",
  "napi",
  "napi-build",
  "napi-derive",
+ "serde_json",
  "tokio",
 ]
 
