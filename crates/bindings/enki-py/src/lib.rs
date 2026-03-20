@@ -1,7 +1,11 @@
 use async_trait::async_trait;
 use core_next::agent::{Agent, AgentDefinition};
-use core_next::llm::{ChatMessage, LlmConfig, LlmProvider, LlmResponse, ResponseStream, ToolDefinition};
-use core_next::memory::{MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy};
+use core_next::llm::{
+    ChatMessage, LlmConfig, LlmProvider, LlmResponse, ResponseStream, ToolDefinition,
+};
+use core_next::memory::{
+    MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
+};
 use core_next::tooling::tool_calling::RegistryToolExecutor;
 use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
 use futures::stream;
@@ -73,12 +77,7 @@ pub trait EnkiMemoryHandler: Send + Sync {
 }
 
 pub trait EnkiLlmHandler: Send + Sync {
-    fn complete(
-        &self,
-        model: String,
-        messages_json: String,
-        tools_json: String,
-    ) -> String;
+    fn complete(&self, model: String, messages_json: String, tools_json: String) -> String;
 }
 
 struct PythonTool {
@@ -234,10 +233,7 @@ fn build_memory_manager(
         })
         .collect();
 
-    MemoryManager::new(
-        Box::new(PythonMemoryRouter { provider_names }),
-        providers,
-    )
+    MemoryManager::new(Box::new(PythonMemoryRouter { provider_names }), providers)
 }
 
 #[async_trait]
@@ -247,7 +243,8 @@ impl LlmProvider for PythonLlmProvider {
         messages: &[ChatMessage],
         _config: &LlmConfig,
     ) -> core_next::llm::Result<LlmResponse> {
-        self.complete_with_tools(messages, &[], &LlmConfig::default()).await
+        self.complete_with_tools(messages, &[], &LlmConfig::default())
+            .await
     }
 
     async fn complete_stream(
@@ -363,12 +360,7 @@ impl EnkiAgent {
             max_iterations: max_iterations as usize,
         };
 
-        Self::from_custom_tools(
-            definition,
-            workspace_home,
-            tools,
-            handler,
-        )
+        Self::from_custom_tools(definition, workspace_home, tools, handler)
     }
 
     pub fn with_memory(
@@ -537,10 +529,7 @@ impl EnkiAgent {
         )
     }
 
-    fn from_registry(
-        definition: AgentDefinition,
-        workspace_home: Option<String>,
-    ) -> Self {
+    fn from_registry(definition: AgentDefinition, workspace_home: Option<String>) -> Self {
         let workspace_home = workspace_home.map(PathBuf::from);
         let (request_tx, request_rx) = mpsc::channel::<RunRequest>();
 
@@ -666,9 +655,8 @@ impl EnkiAgent {
                 None => ToolRegistry::new(),
             };
 
-            let memory = memory_handler.map(|handler| {
-                build_memory_manager(memories, Arc::from(handler))
-            });
+            let memory =
+                memory_handler.map(|handler| build_memory_manager(memories, Arc::from(handler)));
             let llm = llm_handler.map(|handler| {
                 Box::new(PythonLlmProvider {
                     model: definition.model.clone(),
@@ -676,24 +664,25 @@ impl EnkiAgent {
                 }) as Box<dyn LlmProvider>
             });
 
-            let agent =
-                match runtime.block_on(Agent::with_definition_tool_registry_executor_llm_and_workspace(
+            let agent = match runtime.block_on(
+                Agent::with_definition_tool_registry_executor_llm_and_workspace(
                     definition,
                     tool_registry,
                     Box::new(RegistryToolExecutor),
                     llm,
                     memory,
                     workspace_home,
-                )) {
-                    Ok(agent) => agent,
-                    Err(error) => {
-                        let message = format!("Initialization error: {error}");
-                        for request in request_rx {
-                            let _ = request.reply_tx.send(message.clone());
-                        }
-                        return;
+                ),
+            ) {
+                Ok(agent) => agent,
+                Err(error) => {
+                    let message = format!("Initialization error: {error}");
+                    for request in request_rx {
+                        let _ = request.reply_tx.send(message.clone());
                     }
-                };
+                    return;
+                }
+            };
 
             for request in request_rx {
                 let response =

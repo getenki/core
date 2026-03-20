@@ -736,12 +736,12 @@ mod tests {
         ChatMessage, LlmConfig, LlmError, LlmProvider, LlmResponse, Result as LlmResult,
         ToolDefinition,
     };
-    use crate::tooling::types::{parse_tool_args, Tool, ToolContext, ToolRegistryBuilder};
+    use crate::tooling::types::{Tool, ToolContext, ToolRegistryBuilder, parse_tool_args};
     use async_trait::async_trait;
     use futures::stream;
     use serde::Deserialize;
-    use serde_json::json;
     use serde_json::Value;
+    use serde_json::json;
     use std::collections::VecDeque;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
