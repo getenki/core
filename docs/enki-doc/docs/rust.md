@@ -13,7 +13,7 @@ The main crates in this repository are:
 
 - `crates/core`: Rust agent runtime, memory system, tool execution, LLM provider abstraction, and CLI entrypoint
 - `crates/bindings/enki-py`: UniFFI-based Python bindings
-- `crates/bindings/enki-js`: `wasm-bindgen` JavaScript bindings
+- `crates/bindings/enki-js`: native Node.js bindings built with `napi-rs`
 
 ## What the runtime provides
 
@@ -30,7 +30,7 @@ Examples of model strings used in this workspace:
 - `ollama::qwen3.5`
 - `openai::gpt-4o`
 - `anthropic::claude-3-opus-20240229`
-- `google::gemini-pro`
+- `google::gemini-3.1-pro-preview`
 
 ## Build the workspace
 
