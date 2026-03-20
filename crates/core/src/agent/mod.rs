@@ -5,8 +5,8 @@ use crate::llm::{
     ChatMessage, LlmConfig, LlmProvider, MessageRole, ToolDefinition, UniversalLLMClient,
 };
 use crate::memory::MemoryManager;
-use crate::message::message::IndexedValue;
-use crate::message::message::{next_request_id, Message};
+use crate::message::IndexedValue;
+use crate::message::{Message, next_request_id};
 use crate::tooling::builtin_tools;
 use crate::tooling::tool_calling::{RegistryToolExecutor, ToolCallRegistry, ToolExecutor};
 use crate::tooling::types::{ToolContext, ToolRegistry};
@@ -433,10 +433,10 @@ Current task workspace: {}
                     }
 
                     depth -= 1;
-                    if depth == 0 {
-                        if let Some(start_idx) = start.take() {
-                            candidates.push(&content[start_idx..=idx]);
-                        }
+                    if depth == 0
+                        && let Some(start_idx) = start.take()
+                    {
+                        candidates.push(&content[start_idx..=idx]);
                     }
                 }
                 _ => {}
@@ -446,10 +446,10 @@ Current task workspace: {}
         // If we still have an unclosed candidate (LLM dropped trailing `}`),
         // include the remainder as a candidate so parse_tool_call_value can
         // attempt to repair it.
-        if depth > 0 {
-            if let Some(start_idx) = start {
-                candidates.push(&content[start_idx..]);
-            }
+        if depth > 0
+            && let Some(start_idx) = start
+        {
+            candidates.push(&content[start_idx..]);
         }
 
         candidates

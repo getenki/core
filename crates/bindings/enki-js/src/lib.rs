@@ -47,6 +47,12 @@ type MemoryFlushHandler =
   ThreadsafeFunction<MemorySessionInvocation, (), FnArgs<(String, String)>, napi::Status, false>;
 type MemoryConsolidateHandler =
   ThreadsafeFunction<MemorySessionInvocation, (), FnArgs<(String, String)>, napi::Status, false>;
+type SharedToolCallback<'scope> =
+  Function<'scope, FnArgs<(String, String, String, String, String)>, String>;
+type RecordCallback<'scope> = Function<'scope, FnArgs<(String, String, String, String)>, ()>;
+type RecallCallback<'scope> =
+  Function<'scope, FnArgs<(String, String, String, u32)>, Vec<JsMemoryEntry>>;
+type SessionCallback<'scope> = Function<'scope, FnArgs<(String, String)>, ()>;
 
 struct RunRequest {
   session_id: String,
@@ -91,6 +97,35 @@ struct WorkerConfig {
   tools: Vec<ResolvedToolDefinition>,
   memories: Vec<JsMemoryModule>,
   memory_handlers: Option<Arc<JsMemoryHandlers>>,
+}
+
+struct BuildOptions {
+  name: Option<String>,
+  system_prompt_preamble: Option<String>,
+  model: Option<String>,
+  max_iterations: Option<u32>,
+  workspace_home: Option<String>,
+}
+
+struct MemoryFactoryOptions<'scope> {
+  build: BuildOptions,
+  memories: Vec<JsMemoryModule>,
+  handlers: JsMemoryCallbackSet<'scope>,
+}
+
+struct ToolAndMemoryFactoryOptions<'scope> {
+  build: BuildOptions,
+  tools: Vec<Object<'scope>>,
+  tool_handler: Option<SharedToolCallback<'scope>>,
+  memories: Vec<JsMemoryModule>,
+  handlers: JsMemoryCallbackSet<'scope>,
+}
+
+struct JsMemoryCallbackSet<'scope> {
+  record: RecordCallback<'scope>,
+  recall: RecallCallback<'scope>,
+  flush: SessionCallback<'scope>,
+  consolidate: SessionCallback<'scope>,
 }
 
 struct ToolInvocation {
@@ -307,7 +342,7 @@ impl NativeEnkiAgent {
     max_iterations: Option<u32>,
     workspace_home: Option<String>,
     tools: Vec<Object<'_>>,
-    tool_handler: Option<Function<'_, FnArgs<(String, String, String, String, String)>, String>>,
+    tool_handler: Option<SharedToolCallback<'_>>,
   ) -> napi::Result<Self> {
     let tools = resolve_tool_definitions(tools, tool_handler)?;
 
@@ -326,6 +361,7 @@ impl NativeEnkiAgent {
   }
 
   #[napi(factory, js_name = "withMemory")]
+  #[allow(clippy::too_many_arguments)]
   pub fn with_memory(
     name: Option<String>,
     system_prompt_preamble: Option<String>,
@@ -333,31 +369,31 @@ impl NativeEnkiAgent {
     max_iterations: Option<u32>,
     workspace_home: Option<String>,
     memories: Vec<JsMemoryModule>,
-    record_handler: Function<'_, FnArgs<(String, String, String, String)>, ()>,
-    recall_handler: Function<'_, FnArgs<(String, String, String, u32)>, Vec<JsMemoryEntry>>,
-    flush_handler: Function<'_, FnArgs<(String, String)>, ()>,
-    consolidate_handler: Function<'_, FnArgs<(String, String)>, ()>,
+    record_handler: RecordCallback<'_>,
+    recall_handler: RecallCallback<'_>,
+    flush_handler: SessionCallback<'_>,
+    consolidate_handler: SessionCallback<'_>,
   ) -> napi::Result<Self> {
-    Self::build(
-      name,
-      system_prompt_preamble,
-      model,
-      max_iterations,
-      workspace_home,
-      WorkerConfig {
-        tools: Vec::new(),
-        memories,
-        memory_handlers: Some(Arc::new(build_memory_handlers(
-          record_handler,
-          recall_handler,
-          flush_handler,
-          consolidate_handler,
-        )?)),
+    Self::build_with_memory(MemoryFactoryOptions {
+      build: BuildOptions {
+        name,
+        system_prompt_preamble,
+        model,
+        max_iterations,
+        workspace_home,
       },
-    )
+      memories,
+      handlers: JsMemoryCallbackSet {
+        record: record_handler,
+        recall: recall_handler,
+        flush: flush_handler,
+        consolidate: consolidate_handler,
+      },
+    })
   }
 
   #[napi(factory, js_name = "withToolsAndMemory")]
+  #[allow(clippy::too_many_arguments)]
   pub fn with_tools_and_memory(
     name: Option<String>,
     system_prompt_preamble: Option<String>,
@@ -365,32 +401,31 @@ impl NativeEnkiAgent {
     max_iterations: Option<u32>,
     workspace_home: Option<String>,
     tools: Vec<Object<'_>>,
-    tool_handler: Option<Function<'_, FnArgs<(String, String, String, String, String)>, String>>,
+    tool_handler: Option<SharedToolCallback<'_>>,
     memories: Vec<JsMemoryModule>,
-    record_handler: Function<'_, FnArgs<(String, String, String, String)>, ()>,
-    recall_handler: Function<'_, FnArgs<(String, String, String, u32)>, Vec<JsMemoryEntry>>,
-    flush_handler: Function<'_, FnArgs<(String, String)>, ()>,
-    consolidate_handler: Function<'_, FnArgs<(String, String)>, ()>,
+    record_handler: RecordCallback<'_>,
+    recall_handler: RecallCallback<'_>,
+    flush_handler: SessionCallback<'_>,
+    consolidate_handler: SessionCallback<'_>,
   ) -> napi::Result<Self> {
-    let tools = resolve_tool_definitions(tools, tool_handler)?;
-
-    Self::build(
-      name,
-      system_prompt_preamble,
-      model,
-      max_iterations,
-      workspace_home,
-      WorkerConfig {
-        tools,
-        memories,
-        memory_handlers: Some(Arc::new(build_memory_handlers(
-          record_handler,
-          recall_handler,
-          flush_handler,
-          consolidate_handler,
-        )?)),
+    Self::build_with_tools_and_memory(ToolAndMemoryFactoryOptions {
+      build: BuildOptions {
+        name,
+        system_prompt_preamble,
+        model,
+        max_iterations,
+        workspace_home,
       },
-    )
+      tools,
+      tool_handler,
+      memories,
+      handlers: JsMemoryCallbackSet {
+        record: record_handler,
+        recall: recall_handler,
+        flush: flush_handler,
+        consolidate: consolidate_handler,
+      },
+    })
   }
 
   #[napi]
@@ -404,6 +439,41 @@ impl NativeEnkiAgent {
 }
 
 impl NativeEnkiAgent {
+  fn build_from_options(build: BuildOptions, worker_config: WorkerConfig) -> napi::Result<Self> {
+    Self::build(
+      build.name,
+      build.system_prompt_preamble,
+      build.model,
+      build.max_iterations,
+      build.workspace_home,
+      worker_config,
+    )
+  }
+
+  fn build_with_memory(options: MemoryFactoryOptions<'_>) -> napi::Result<Self> {
+    Self::build_from_options(
+      options.build,
+      WorkerConfig {
+        tools: Vec::new(),
+        memories: options.memories,
+        memory_handlers: Some(Arc::new(build_memory_handlers(options.handlers)?)),
+      },
+    )
+  }
+
+  fn build_with_tools_and_memory(options: ToolAndMemoryFactoryOptions<'_>) -> napi::Result<Self> {
+    let tools = resolve_tool_definitions(options.tools, options.tool_handler)?;
+
+    Self::build_from_options(
+      options.build,
+      WorkerConfig {
+        tools,
+        memories: options.memories,
+        memory_handlers: Some(Arc::new(build_memory_handlers(options.handlers)?)),
+      },
+    )
+  }
+
   fn build(
     name: Option<String>,
     system_prompt_preamble: Option<String>,
@@ -486,7 +556,7 @@ fn build_tool_handler(
 }
 
 fn build_shared_tool_handler(
-  tool_handler: Function<'_, FnArgs<(String, String, String, String, String)>, String>,
+  tool_handler: SharedToolCallback<'_>,
 ) -> napi::Result<SharedToolHandler> {
   tool_handler.build_threadsafe_function().build_callback(
     |ctx: ThreadsafeCallContext<ToolInvocation>| {
@@ -501,14 +571,9 @@ fn build_shared_tool_handler(
   )
 }
 
-fn build_memory_handlers(
-  record_handler: Function<'_, FnArgs<(String, String, String, String)>, ()>,
-  recall_handler: Function<'_, FnArgs<(String, String, String, u32)>, Vec<JsMemoryEntry>>,
-  flush_handler: Function<'_, FnArgs<(String, String)>, ()>,
-  consolidate_handler: Function<'_, FnArgs<(String, String)>, ()>,
-) -> napi::Result<JsMemoryHandlers> {
+fn build_memory_handlers(callbacks: JsMemoryCallbackSet<'_>) -> napi::Result<JsMemoryHandlers> {
   Ok(JsMemoryHandlers {
-    record: record_handler.build_threadsafe_function().build_callback(
+    record: callbacks.record.build_threadsafe_function().build_callback(
       |ctx: ThreadsafeCallContext<MemoryRecordInvocation>| {
         Ok(FnArgs::from((
           ctx.value.memory_name,
@@ -518,7 +583,7 @@ fn build_memory_handlers(
         )))
       },
     )?,
-    recall: recall_handler.build_threadsafe_function().build_callback(
+    recall: callbacks.recall.build_threadsafe_function().build_callback(
       |ctx: ThreadsafeCallContext<MemoryRecallInvocation>| {
         Ok(FnArgs::from((
           ctx.value.memory_name,
@@ -528,12 +593,13 @@ fn build_memory_handlers(
         )))
       },
     )?,
-    flush: flush_handler.build_threadsafe_function().build_callback(
+    flush: callbacks.flush.build_threadsafe_function().build_callback(
       |ctx: ThreadsafeCallContext<MemorySessionInvocation>| {
         Ok(FnArgs::from((ctx.value.memory_name, ctx.value.session_id)))
       },
     )?,
-    consolidate: consolidate_handler
+    consolidate: callbacks
+      .consolidate
       .build_threadsafe_function()
       .build_callback(|ctx: ThreadsafeCallContext<MemorySessionInvocation>| {
         Ok(FnArgs::from((ctx.value.memory_name, ctx.value.session_id)))
@@ -543,7 +609,7 @@ fn build_memory_handlers(
 
 fn resolve_tool_definitions(
   tools: Vec<Object<'_>>,
-  tool_handler: Option<Function<'_, FnArgs<(String, String, String, String, String)>, String>>,
+  tool_handler: Option<SharedToolCallback<'_>>,
 ) -> napi::Result<Vec<ResolvedToolDefinition>> {
   let mut resolved_tools = Vec::with_capacity(tools.len());
   let shared_handler = tool_handler

@@ -1,1 +1,4 @@
-pub mod message;
+#[path = "message.rs"]
+mod types;
+
+pub(crate) use types::*;
