@@ -20,7 +20,7 @@ const sidebars = {
             label: "JavaScript",
             items: [
                 "javascript",
-                "wasm-usage"
+                "typescript"
             ]
         },
         {

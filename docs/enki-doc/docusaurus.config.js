@@ -1,13 +1,13 @@
 const config = {
-  title: "enki-py",
-  tagline: "Python bindings and agent wrapper for Enki",
+  title: "Enki Docs",
+  tagline: "Rust runtime plus Python and JavaScript bindings for Enki",
   favicon: "img/favicon.png",
 
   url: "http://localhost",
   baseUrl: "/",
 
-  organizationName: "enki",
-  projectName: "enki-py-docs",
+  organizationName: "getenki",
+  projectName: "enki-docs",
 
   onBrokenLinks: "throw",
   i18n: {
@@ -43,7 +43,7 @@ const config = {
       respectPrefersColorScheme: true
     },
     navbar: {
-      title: "enki-py",
+      title: "Enki Docs",
       logo: {
         alt: "Enki logo",
         src: "img/logo-light.png",
@@ -69,7 +69,7 @@ const config = {
               to: "/docs/intro"
             },
             {
-              label: "Getting Started Guide",
+              label: "Python Quickstart",
               to: "/docs/agent-wrapper"
             }
           ]
@@ -78,12 +78,12 @@ const config = {
           title: "Source",
           items: [
             {
-              label: "Rust crate",
-              to: "/docs/low-level-api"
+              label: "JavaScript",
+              to: "/docs/javascript"
             },
             {
-              label: "Examples",
-              to: "/docs/examples"
+              label: "Rust",
+              to: "/docs/rust"
             }
           ]
         }

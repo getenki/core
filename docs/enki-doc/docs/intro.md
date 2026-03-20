@@ -5,13 +5,13 @@ slug: /intro
 
 # Enki
 
-Enki is an async-first agent framework built around a Rust runtime, with separate bindings for Python and JavaScript.
+Enki is an async-first agent framework built around a Rust runtime, with bindings for Python and JavaScript.
 
-This docs site now splits the main entry points by language so each stack has its own place:
+This site tracks the current `core-next` workspace:
 
-- [Python](/docs/python): published `enki-py` package, high-level `Agent` wrapper, low-level bindings, and memory APIs
-- [JavaScript](/docs/javascript): browser-oriented `enki-js` WASM bindings with JavaScript callbacks for LLMs and tools
-- [Rust](/docs/rust): core runtime, workspace layout, and local build workflow
+- [Python](/docs/python): the published `enki-py` package, high-level `Agent` wrapper, low-level bindings, and memory APIs
+- [JavaScript](/docs/javascript): the published `@getenki/ai` native Node.js package with tools and memory support
+- [Rust](/docs/rust): the core runtime workspace, crate layout, and local build workflow
 
 ## Choose your entry point
 
@@ -31,12 +31,12 @@ Start here:
 
 ### JavaScript
 
-Use JavaScript when you want to run Enki through WebAssembly in a browser or another JS runtime that can load WASM.
+Use JavaScript when you want to run Enki from Node.js through the native `@getenki/ai` package.
 
 Start here:
 
 - [JavaScript overview](/docs/javascript)
-- [WASM Usage](/docs/wasm-usage)
+- [TypeScript](/docs/typescript)
 
 ### Rust
 
