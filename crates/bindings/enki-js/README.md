@@ -1,6 +1,6 @@
 # `@getenki/ai`
 
-JavaScript bindings for Enki's Rust agent runtime, published as a native Node.js package via `napi-rs`.
+Node.js bindings for Enki's Rust agent runtime, published as a native package via `napi-rs`.
 
 ## Install
 
@@ -14,30 +14,37 @@ The package ships prebuilt native binaries for:
 - macOS x64 and arm64
 - Linux x64 and arm64 (GNU libc)
 
-## API
+## What It Exports
 
-The package exposes two layers:
+The current package surface is intentionally small:
 
-- `EnkiAgent`: thin wrapper over the native runtime
-- `Agent`: higher-level JavaScript wrapper for tools, memories, and custom LLM providers
+- `NativeEnkiAgent`
+- `JsMemoryKind`
+- `JsMemoryModule`
+- `JsMemoryEntry`
 
-It also exports `NativeEnkiAgent`, `Tool`, `MemoryModule`, `MemoryBackend`, `LlmProviderBackend`, `RunContext`, and `AgentRunResult`.
+`NativeEnkiAgent` is the main entrypoint. It can be created in four modes:
 
-## `EnkiAgent`
+- `new(...)` for a plain agent
+- `NativeEnkiAgent.withTools(...)`
+- `NativeEnkiAgent.withMemory(...)`
+- `NativeEnkiAgent.withToolsAndMemory(...)`
 
-Use `EnkiAgent` when you want a simple session-oriented interface backed directly by the native runtime.
+## Basic Agent
+
+Use the constructor when you only need a session-based agent backed by the native runtime.
 
 ```js
-const { EnkiAgent } = require('@getenki/ai')
+const { NativeEnkiAgent } = require('@getenki/ai')
 
 async function main() {
-  const agent = new EnkiAgent({
-    name: 'Assistant',
-    systemPromptPreamble: 'Answer clearly and keep responses short.',
-    model: 'ollama::llama3.2:latest',
-    maxIterations: 20,
-    workspaceHome: process.cwd(),
-  })
+  const agent = new NativeEnkiAgent(
+    'Assistant',
+    'Answer clearly and keep responses short.',
+    'ollama::qwen3.5:latest',
+    20,
+    process.cwd(),
+  )
 
   const output = await agent.run('session-1', 'Explain what this project does.')
   console.log(output)
@@ -46,7 +53,24 @@ async function main() {
 main().catch(console.error)
 ```
 
-Constructor options:
+TypeScript version:
+
+```ts
+import { NativeEnkiAgent } from '@getenki/ai'
+
+const agent = new NativeEnkiAgent(
+  'Assistant',
+  'Answer clearly and keep responses short.',
+  'ollama::qwen3.5:latest',
+  20,
+  process.cwd(),
+)
+
+const output = await agent.run('session-1', 'Explain what this project does.')
+console.log(output)
+```
+
+Constructor arguments:
 
 - `name?: string`
 - `systemPromptPreamble?: string`
@@ -54,96 +78,349 @@ Constructor options:
 - `maxIterations?: number`
 - `workspaceHome?: string`
 
-## `Agent`
+If omitted, the runtime falls back to built-in defaults for name, prompt, and max iterations.
 
-Use `Agent` when you want to register JavaScript tools or plug in your own LLM provider.
+## Tools
 
-```js
-const { Agent } = require('@getenki/ai')
+Tools can be attached with `NativeEnkiAgent.withTools(...)`. Each tool object must provide:
 
-async function main() {
-  const agent = new Agent('demo-model', {
-    instructions: 'You are a dice game.',
-    workspaceHome: process.cwd(),
-  })
+- `id` or `name`
+- `description`
+- one of `inputSchema`, `inputSchemaJson`, `parameters`, or `parametersJson`
+- either `execute(inputJson, contextJson)` or a shared `toolHandler`
 
-  agent.toolPlain(
-    function rollDice() {
-      return '4'
-    },
-    {
-      description: 'Roll a six-sided die and return the result.',
-      parametersJson: JSON.stringify({
-        type: 'object',
-        properties: {},
-        additionalProperties: false,
-      }),
-    },
-  )
-
-  const result = await agent.run('My guess is 4', {
-    sessionId: 'session-tools-1',
-  })
-
-  console.log(result.output)
-}
-
-main().catch(console.error)
-```
-
-### Context-aware tools
-
-`agent.tool()` injects a `RunContext` as the first argument so your tool can access runtime dependencies.
+Example:
 
 ```js
-const { Agent } = require('@getenki/ai')
+const { NativeEnkiAgent } = require('@getenki/ai')
 
-const agent = new Agent('demo-model')
-
-agent.tool(
-  function getPlayerName(ctx) {
-    return ctx.deps.playerName
-  },
+const tools = [
   {
-    description: "Get the player's name.",
-    parametersJson: JSON.stringify({
+    id: 'calculate_sum',
+    description: 'Add two numbers and return a short text result.',
+    inputSchema: {
       type: 'object',
-      properties: {},
-      additionalProperties: false,
-    }),
+      properties: {
+        a: { type: 'number' },
+        b: { type: 'number' },
+      },
+      required: ['a', 'b'],
+    },
+    execute: (inputJson, contextJson) => {
+      const args = inputJson ? JSON.parse(inputJson) : {}
+      const ctx = contextJson ? JSON.parse(contextJson) : {}
+      const result = Number(args.a) + Number(args.b)
+
+      return JSON.stringify({
+        result,
+        workspaceDir: ctx.workspaceDir,
+        text: `${args.a} + ${args.b} = ${result}`,
+      })
+    },
   },
+]
+
+const agent = NativeEnkiAgent.withTools(
+  'Tool Agent',
+  'Use tools when they help.',
+  'ollama::qwen3.5:latest',
+  20,
+  process.cwd(),
+  tools,
+  null,
 )
 ```
 
-Then pass dependencies at run time:
+Per-tool `execute` receives:
 
-```js
-const result = await agent.run('Say hello.', {
-  sessionId: 'session-ctx-1',
-  deps: { playerName: 'Anne' },
-})
-```
+- `inputJson`: serialized tool arguments
+- `contextJson`: serialized runtime context with `agentDir`, `workspaceDir`, and `sessionsDir`
 
-## Custom LLM providers
+TypeScript tool example:
 
-Pass either a subclass of `LlmProviderBackend` or a function through the `llm` option.
+```ts
+import { NativeEnkiAgent } from '@getenki/ai'
 
-```js
-const { Agent, LlmProviderBackend } = require('@getenki/ai')
-
-class DemoProvider extends LlmProviderBackend {
-  complete(model, messages, tools) {
-    return {
-      model,
-      content: `Received ${messages.length} message(s) and ${tools.length} tool(s).`,
-    }
-  }
+type SumArgs = {
+  a?: number
+  b?: number
 }
 
-const agent = new Agent('demo-model', {
-  llm: new DemoProvider(),
-})
+type ExampleTool = {
+  id: string
+  description: string
+  inputSchema: Record<string, unknown>
+  execute: (inputJson: string, contextJson: string) => string
+}
+
+const tools: ExampleTool[] = [
+  {
+    id: 'calculate_sum',
+    description: 'Add two numbers and return a short text result.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        a: { type: 'number' },
+        b: { type: 'number' },
+      },
+      required: ['a', 'b'],
+    },
+    execute: (inputJson: string, contextJson: string): string => {
+      const args = inputJson ? (JSON.parse(inputJson) as SumArgs) : {}
+      const ctx = contextJson
+        ? (JSON.parse(contextJson) as { workspaceDir?: string })
+        : {}
+      const result = Number(args.a) + Number(args.b)
+
+      return JSON.stringify({
+        result,
+        workspaceDir: ctx.workspaceDir,
+        text: `${args.a} + ${args.b} = ${result}`,
+      })
+    },
+  },
+]
+
+const agent = NativeEnkiAgent.withTools(
+  'Tool Agent',
+  'Use tools when they help.',
+  'ollama::qwen3.5:latest',
+  20,
+  process.cwd(),
+  tools,
+  null,
+)
 ```
+
+Instead of putting `execute` on every tool, you can pass a shared `toolHandler` as the final argument to `withTools(...)` or `withToolsAndMemory(...)`. The shared handler receives:
+
+- `toolName`
+- `inputJson`
+- `agentDir`
+- `workspaceDir`
+- `sessionsDir`
+
+## Memory
+
+Memory modules are plain objects:
+
+```js
+const memories = [{ name: 'example-memory' }]
+```
+
+When using `withMemory(...)` or `withToolsAndMemory(...)`, you supply four callbacks:
+
+- `recordHandler(memoryName, sessionId, userMsg, assistantMsg)`
+- `recallHandler(memoryName, sessionId, query, maxEntries)`
+- `flushHandler(memoryName, sessionId)`
+- `consolidateHandler(memoryName, sessionId)`
+
+`recallHandler` must return an array of `JsMemoryEntry` objects:
+
+```ts
+type JsMemoryEntry = {
+  key: string
+  content: string
+  kind: JsMemoryKind
+  relevance: number
+  timestampNs: string
+}
+```
+
+Supported memory kinds:
+
+- `JsMemoryKind.RecentMessage`
+- `JsMemoryKind.Summary`
+- `JsMemoryKind.Entity`
+- `JsMemoryKind.Preference`
+
+TypeScript memory typing example:
+
+```ts
+import {
+  JsMemoryKind,
+  type JsMemoryEntry,
+  type JsMemoryModule,
+} from '@getenki/ai'
+
+const memories: JsMemoryModule[] = [{ name: 'example-memory' }]
+const memoryStore = new Map<string, JsMemoryEntry[]>()
+
+function memoryKey(memoryName: string, sessionId: string): string {
+  return `${memoryName}:${sessionId}`
+}
+
+function getMemoryEntries(memoryName: string, sessionId: string): JsMemoryEntry[] {
+  const key = memoryKey(memoryName, sessionId)
+  const existing = memoryStore.get(key)
+  if (existing) {
+    return existing
+  }
+
+  const empty: JsMemoryEntry[] = []
+  memoryStore.set(key, empty)
+  return empty
+}
+
+const recordHandler = (
+  memoryName: string,
+  sessionId: string,
+  userMsg: string,
+  assistantMsg: string,
+): void => {
+  const entries = getMemoryEntries(memoryName, sessionId)
+  entries.push({
+    key: `entry-${entries.length + 1}`,
+    content: `User: ${userMsg}\nAssistant: ${assistantMsg}`,
+    kind: JsMemoryKind.RecentMessage,
+    relevance: 1,
+    timestampNs: `${Date.now() * 1000000}`,
+  })
+}
+```
+
+## Tools And Memory Example
+
+The repository examples in [`example/basic-js/index.js`](/I:/projects/enki/core-next/example/basic-js/index.js) and [`example/basic-ts/index.ts`](/I:/projects/enki/core-next/example/basic-ts/index.ts) use `NativeEnkiAgent.withToolsAndMemory(...)` with:
+
+- a `calculate_sum` tool
+- a `get_today` tool
+- an in-memory `Map` for session memory storage
+
+Minimal JavaScript version:
+
+```js
+const { JsMemoryKind, NativeEnkiAgent } = require('@getenki/ai')
+
+const tools = [
+  {
+    id: 'get_today',
+    description: 'Return the current local date in ISO format.',
+    inputSchema: { type: 'object', properties: {} },
+    execute: () => JSON.stringify({ today: new Date().toISOString().slice(0, 10) }),
+  },
+]
+
+const memories = [{ name: 'example-memory' }]
+const memoryStore = new Map()
+
+function memoryKey(memoryName, sessionId) {
+  return `${memoryName}:${sessionId}`
+}
+
+const agent = NativeEnkiAgent.withToolsAndMemory(
+  'Basic JS Agent',
+  'Answer clearly and keep responses short.',
+  'ollama::qwen3.5:latest',
+  20,
+  process.cwd(),
+  tools,
+  null,
+  memories,
+  (memoryName, sessionId, userMsg, assistantMsg) => {
+    const key = memoryKey(memoryName, sessionId)
+    const entries = memoryStore.get(key) ?? []
+    entries.push({
+      key: `entry-${entries.length + 1}`,
+      content: `User: ${userMsg}\nAssistant: ${assistantMsg}`,
+      kind: JsMemoryKind.RecentMessage,
+      relevance: 1,
+      timestampNs: `${Date.now() * 1000000}`,
+    })
+    memoryStore.set(key, entries)
+  },
+  (memoryName, sessionId, query, maxEntries) => {
+    const entries = memoryStore.get(memoryKey(memoryName, sessionId)) ?? []
+    return entries.filter((entry) => entry.content.includes(query)).slice(-maxEntries)
+  },
+  (memoryName, sessionId) => {
+    memoryStore.delete(memoryKey(memoryName, sessionId))
+  },
+  () => {},
+)
+```
+
+Minimal TypeScript version:
+
+```ts
+import {
+  JsMemoryKind,
+  type JsMemoryEntry,
+  type JsMemoryModule,
+  NativeEnkiAgent,
+} from '@getenki/ai'
+
+type ExampleTool = {
+  id: string
+  description: string
+  inputSchema: Record<string, unknown>
+  execute: (inputJson: string, contextJson: string) => string
+}
+
+const tools: ExampleTool[] = [
+  {
+    id: 'get_today',
+    description: 'Return the current local date in ISO format.',
+    inputSchema: { type: 'object', properties: {} },
+    execute: (): string =>
+      JSON.stringify({ today: new Date().toISOString().slice(0, 10) }),
+  },
+]
+
+const memories: JsMemoryModule[] = [{ name: 'example-memory' }]
+const memoryStore = new Map<string, JsMemoryEntry[]>()
+
+const agent = NativeEnkiAgent.withToolsAndMemory(
+  'Basic TS Agent',
+  'Answer clearly and keep responses short.',
+  'ollama::qwen3.5:latest',
+  20,
+  process.cwd(),
+  tools,
+  null,
+  memories,
+  (memoryName: string, sessionId: string, userMsg: string, assistantMsg: string): void => {
+    const key = `${memoryName}:${sessionId}`
+    const entries = memoryStore.get(key) ?? []
+    entries.push({
+      key: `entry-${entries.length + 1}`,
+      content: `User: ${userMsg}\nAssistant: ${assistantMsg}`,
+      kind: JsMemoryKind.RecentMessage,
+      relevance: 1,
+      timestampNs: `${Date.now() * 1000000}`,
+    })
+    memoryStore.set(key, entries)
+  },
+  (memoryName: string, sessionId: string, query: string, maxEntries: number): JsMemoryEntry[] => {
+    const entries = memoryStore.get(`${memoryName}:${sessionId}`) ?? []
+    return entries.filter((entry) => entry.content.includes(query)).slice(-maxEntries)
+  },
+  (memoryName: string, sessionId: string): void => {
+    memoryStore.delete(`${memoryName}:${sessionId}`)
+  },
+  (): void => {},
+)
+```
+
+## Running The Examples
+
+JavaScript example:
+
+```bash
+cd example/basic-js
+npm install
+npm start
+```
+
+TypeScript example:
+
+```bash
+cd example/basic-ts
+npm install
+npm start
+```
+
+The checked-in examples currently hardcode `ollama::qwen3.5:latest` as the model, so make sure that model is available in your local provider before running them.
 
 ## Development
 
@@ -162,9 +439,3 @@ Useful scripts:
 - `npm test`: run the AVA test suite
 - `npm run lint`: run `oxlint`
 - `npm run format`: run Prettier, `cargo fmt`, and `taplo format`
-
-## Notes
-
-- `Agent` can register tools, memories, and custom LLM providers in JavaScript.
-- The default native constructor uses `20` max iterations when none is provided.
-- `workspaceHome` lets you control where the runtime creates and resolves workspace state.
