@@ -7,11 +7,11 @@ use core_next::memory::{
 };
 use core_next::tooling::tool_calling::RegistryToolExecutor;
 use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
-use napi::bindgen_prelude::{AsyncTask, FnArgs, Function};
+use napi::bindgen_prelude::{AsyncTask, FnArgs, Function, JsObjectValue, Object, Unknown};
 use napi::threadsafe_function::{ThreadsafeCallContext, ThreadsafeFunction};
-use napi::{Env, Task};
+use napi::{Env, JSON, JsValue, Task};
 use napi_derive::napi;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
@@ -20,7 +20,9 @@ const DEFAULT_NAME: &str = "Personal Assistant";
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful Personal Assistant agent.";
 const DEFAULT_MAX_ITERATIONS: u32 = 20;
 
-type ToolHandler = ThreadsafeFunction<
+type ToolHandler =
+  ThreadsafeFunction<ToolInvocation, String, FnArgs<(String, String)>, napi::Status, false>;
+type SharedToolHandler = ThreadsafeFunction<
   ToolInvocation,
   String,
   FnArgs<(String, String, String, String, String)>,
@@ -66,7 +68,7 @@ struct JsTool {
   name: String,
   description: String,
   parameters: Value,
-  handler: Arc<ToolHandler>,
+  handler: Arc<JsToolHandler>,
 }
 
 struct JsMemoryProvider {
@@ -87,14 +89,13 @@ struct JsMemoryHandlers {
 
 struct WorkerConfig {
   tools: Vec<ResolvedToolDefinition>,
-  tool_handler: Option<Arc<ToolHandler>>,
   memories: Vec<JsMemoryModule>,
   memory_handlers: Option<Arc<JsMemoryHandlers>>,
 }
 
 struct ToolInvocation {
   tool_name: String,
-  args_json: String,
+  input_json: String,
   agent_dir: String,
   workspace_dir: String,
   sessions_dir: String,
@@ -127,17 +128,16 @@ pub enum JsMemoryKind {
   Preference,
 }
 
-#[napi(object)]
-pub struct JsToolDefinition {
-  pub name: String,
-  pub description: String,
-  pub parameters_json: String,
-}
-
 struct ResolvedToolDefinition {
   name: String,
   description: String,
   parameters: Value,
+  handler: Arc<JsToolHandler>,
+}
+
+enum JsToolHandler {
+  PerTool(ToolHandler),
+  Shared(SharedToolHandler),
 }
 
 #[napi(object)]
@@ -174,17 +174,24 @@ impl Tool for JsTool {
   }
 
   async fn execute(&self, args: &Value, ctx: &ToolContext) -> String {
-    self
-      .handler
-      .call_async(ToolInvocation {
-        tool_name: self.name.clone(),
-        args_json: args.to_string(),
-        agent_dir: ctx.agent_dir.to_string_lossy().into_owned(),
-        workspace_dir: ctx.workspace_dir.to_string_lossy().into_owned(),
-        sessions_dir: ctx.sessions_dir.to_string_lossy().into_owned(),
-      })
-      .await
-      .unwrap_or_else(|error| format!("Error: failed to execute tool '{}': {error}", self.name))
+    let invocation = ToolInvocation {
+      tool_name: self.name.clone(),
+      input_json: args.to_string(),
+      agent_dir: ctx.agent_dir.to_string_lossy().into_owned(),
+      workspace_dir: ctx.workspace_dir.to_string_lossy().into_owned(),
+      sessions_dir: ctx.sessions_dir.to_string_lossy().into_owned(),
+    };
+
+    match self.handler.as_ref() {
+      JsToolHandler::PerTool(handler) => handler
+        .call_async(invocation)
+        .await
+        .unwrap_or_else(|error| format!("Error: failed to execute tool '{}': {error}", self.name)),
+      JsToolHandler::Shared(handler) => handler
+        .call_async(invocation)
+        .await
+        .unwrap_or_else(|error| format!("Error: failed to execute tool '{}': {error}", self.name)),
+    }
   }
 }
 
@@ -286,7 +293,6 @@ impl NativeEnkiAgent {
       workspace_home,
       WorkerConfig {
         tools: Vec::new(),
-        tool_handler: None,
         memories: Vec::new(),
         memory_handlers: None,
       },
@@ -300,11 +306,10 @@ impl NativeEnkiAgent {
     model: Option<String>,
     max_iterations: Option<u32>,
     workspace_home: Option<String>,
-    tools: Vec<JsToolDefinition>,
-    tool_handler: Function<'_, FnArgs<(String, String, String, String, String)>, String>,
+    tools: Vec<Object<'_>>,
+    tool_handler: Option<Function<'_, FnArgs<(String, String, String, String, String)>, String>>,
   ) -> napi::Result<Self> {
-    let tool_handler = Arc::new(build_tool_handler(tool_handler)?);
-    let tools = resolve_tool_definitions(tools)?;
+    let tools = resolve_tool_definitions(tools, tool_handler)?;
 
     Self::build(
       name,
@@ -314,7 +319,6 @@ impl NativeEnkiAgent {
       workspace_home,
       WorkerConfig {
         tools,
-        tool_handler: Some(tool_handler),
         memories: Vec::new(),
         memory_handlers: None,
       },
@@ -342,7 +346,6 @@ impl NativeEnkiAgent {
       workspace_home,
       WorkerConfig {
         tools: Vec::new(),
-        tool_handler: None,
         memories,
         memory_handlers: Some(Arc::new(build_memory_handlers(
           record_handler,
@@ -361,16 +364,15 @@ impl NativeEnkiAgent {
     model: Option<String>,
     max_iterations: Option<u32>,
     workspace_home: Option<String>,
-    tools: Vec<JsToolDefinition>,
-    tool_handler: Function<'_, FnArgs<(String, String, String, String, String)>, String>,
+    tools: Vec<Object<'_>>,
+    tool_handler: Option<Function<'_, FnArgs<(String, String, String, String, String)>, String>>,
     memories: Vec<JsMemoryModule>,
     record_handler: Function<'_, FnArgs<(String, String, String, String)>, ()>,
     recall_handler: Function<'_, FnArgs<(String, String, String, u32)>, Vec<JsMemoryEntry>>,
     flush_handler: Function<'_, FnArgs<(String, String)>, ()>,
     consolidate_handler: Function<'_, FnArgs<(String, String)>, ()>,
   ) -> napi::Result<Self> {
-    let tool_handler = Arc::new(build_tool_handler(tool_handler)?);
-    let tools = resolve_tool_definitions(tools)?;
+    let tools = resolve_tool_definitions(tools, tool_handler)?;
 
     Self::build(
       name,
@@ -380,7 +382,6 @@ impl NativeEnkiAgent {
       workspace_home,
       WorkerConfig {
         tools,
-        tool_handler: Some(tool_handler),
         memories,
         memory_handlers: Some(Arc::new(build_memory_handlers(
           record_handler,
@@ -469,13 +470,29 @@ fn build_definition(
 }
 
 fn build_tool_handler(
-  tool_handler: Function<'_, FnArgs<(String, String, String, String, String)>, String>,
+  tool_handler: Function<'_, FnArgs<(String, String)>, String>,
 ) -> napi::Result<ToolHandler> {
+  tool_handler.build_threadsafe_function().build_callback(
+    |ctx: ThreadsafeCallContext<ToolInvocation>| {
+      let context_json = json!({
+        "agentDir": ctx.value.agent_dir,
+        "workspaceDir": ctx.value.workspace_dir,
+        "sessionsDir": ctx.value.sessions_dir,
+      })
+      .to_string();
+      Ok(FnArgs::from((ctx.value.input_json, context_json)))
+    },
+  )
+}
+
+fn build_shared_tool_handler(
+  tool_handler: Function<'_, FnArgs<(String, String, String, String, String)>, String>,
+) -> napi::Result<SharedToolHandler> {
   tool_handler.build_threadsafe_function().build_callback(
     |ctx: ThreadsafeCallContext<ToolInvocation>| {
       Ok(FnArgs::from((
         ctx.value.tool_name,
-        ctx.value.args_json,
+        ctx.value.input_json,
         ctx.value.agent_dir,
         ctx.value.workspace_dir,
         ctx.value.sessions_dir,
@@ -525,31 +542,92 @@ fn build_memory_handlers(
 }
 
 fn resolve_tool_definitions(
-  tools: Vec<JsToolDefinition>,
+  tools: Vec<Object<'_>>,
+  tool_handler: Option<Function<'_, FnArgs<(String, String, String, String, String)>, String>>,
 ) -> napi::Result<Vec<ResolvedToolDefinition>> {
   let mut resolved_tools = Vec::with_capacity(tools.len());
+  let shared_handler = tool_handler
+    .map(build_shared_tool_handler)
+    .transpose()?
+    .map(JsToolHandler::Shared)
+    .map(Arc::new);
+
   for tool in tools {
-    let parameters = serde_json::from_str::<Value>(&tool.parameters_json).map_err(|error| {
+    let name = get_tool_string_property(&tool, &["id", "name"])?;
+    let description = tool.get_named_property::<String>("description")?;
+    let parameters_json = get_tool_schema_json(&tool)?;
+    let parameters = serde_json::from_str::<Value>(&parameters_json).map_err(|error| {
       napi::Error::from_reason(format!(
-        "Invalid parametersJson for tool '{}': {error}",
-        tool.name
+        "Invalid input schema JSON for tool '{}': {error}",
+        name
       ))
     })?;
+    let handler = if tool.has_named_property("execute")? {
+      let execute =
+        tool.get_named_property::<Function<'_, FnArgs<(String, String)>, String>>("execute")?;
+      Arc::new(JsToolHandler::PerTool(build_tool_handler(execute)?))
+    } else if let Some(handler) = shared_handler.as_ref() {
+      Arc::clone(handler)
+    } else {
+      return Err(napi::Error::from_reason(format!(
+        "Tool '{}' must define an execute function or use a shared toolHandler",
+        name
+      )));
+    };
 
     resolved_tools.push(ResolvedToolDefinition {
-      name: tool.name,
-      description: tool.description,
+      name,
+      description,
       parameters,
+      handler,
     });
   }
 
   Ok(resolved_tools)
 }
 
-fn build_tool_registry(
-  tools: Vec<ResolvedToolDefinition>,
-  handler: Arc<ToolHandler>,
-) -> ToolRegistry {
+fn get_tool_string_property(tool: &Object<'_>, names: &[&str]) -> napi::Result<String> {
+  for name in names {
+    if tool.has_named_property(name)? {
+      return tool.get_named_property(name);
+    }
+  }
+
+  let joined = names.join("' or '");
+  Err(napi::Error::from_reason(format!(
+    "Missing tool property '{joined}'"
+  )))
+}
+
+fn get_tool_schema_json(tool: &Object<'_>) -> napi::Result<String> {
+  if tool.has_named_property("inputSchemaJson")? {
+    return tool.get_named_property("inputSchemaJson");
+  }
+  if tool.has_named_property("parametersJson")? {
+    return tool.get_named_property("parametersJson");
+  }
+  if tool.has_named_property("inputSchema")? {
+    return stringify_named_property(tool, "inputSchema");
+  }
+  if tool.has_named_property("parameters")? {
+    return stringify_named_property(tool, "parameters");
+  }
+
+  Err(napi::Error::from_reason(
+    "Missing tool property 'inputSchema', 'inputSchemaJson', 'parameters', or 'parametersJson'"
+      .to_string(),
+  ))
+}
+
+fn stringify_named_property(tool: &Object<'_>, property: &str) -> napi::Result<String> {
+  let env = Env::from_raw(tool.value().env);
+  let global = env.get_global()?;
+  let json: JSON<'_> = global.get_named_property_unchecked("JSON")?;
+  let value = tool.get_named_property::<Unknown<'_>>(property)?;
+  json.stringify(value)
+}
+
+fn build_tool_registry(tools: Vec<ResolvedToolDefinition>) -> ToolRegistry {
   let mut registry = ToolRegistry::new();
 
   for tool in tools {
@@ -560,7 +638,7 @@ fn build_tool_registry(
         name,
         description: tool.description,
         parameters: tool.parameters,
-        handler: Arc::clone(&handler),
+        handler: tool.handler,
       }),
     );
   }
@@ -617,10 +695,7 @@ fn spawn_agent_worker(
       }
     };
 
-    let tool_registry = match worker_config.tool_handler {
-      Some(handler) => build_tool_registry(worker_config.tools, handler),
-      None => ToolRegistry::new(),
-    };
+    let tool_registry = build_tool_registry(worker_config.tools);
     let memory = worker_config
       .memory_handlers
       .map(|handlers| build_memory_manager(worker_config.memories, handlers));

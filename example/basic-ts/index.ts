@@ -2,7 +2,6 @@ import {
     JsMemoryKind,
     type JsMemoryEntry,
     type JsMemoryModule,
-    type JsToolDefinition,
     NativeEnkiAgent,
 } from '@getenki/ai'
 
@@ -11,26 +10,39 @@ declare const process: {
     exitCode?: number
 }
 
-const tools: JsToolDefinition[] = [
+type ExampleTool = {
+    id: string
+    description: string
+    inputSchema: Record<string, unknown>
+    execute: (inputJson: string, contextJson: string) => string
+}
+
+const tools: ExampleTool[] = [
     {
-        name: 'calculate_sum',
+        id: 'calculate_sum',
         description: 'Add two numbers and return a short text result.',
-        parametersJson: JSON.stringify({
+        inputSchema: {
             type: 'object',
             properties: {
                 a: {type: 'number'},
                 b: {type: 'number'},
             },
             required: ['a', 'b'],
-        }),
+        },
+        execute: (inputJson: string): string => {
+            const args = inputJson ? (JSON.parse(inputJson) as {a?: number; b?: number}) : {}
+            const result = Number(args.a) + Number(args.b)
+            return JSON.stringify({result, text: `${args.a} + ${args.b} = ${result}`})
+        },
     },
     {
-        name: 'get_today',
+        id: 'get_today',
         description: 'Return the current local date in ISO format.',
-        parametersJson: JSON.stringify({
+        inputSchema: {
             type: 'object',
             properties: {},
-        }),
+        },
+        execute: (): string => JSON.stringify({today: new Date().toISOString().slice(0, 10)}),
     },
 ]
 
@@ -73,20 +85,7 @@ async function main(): Promise<void> {
         20,
         process.cwd(),
         tools,
-        (toolName: string, argsJson: string): string => {
-            const args = argsJson ? (JSON.parse(argsJson) as {a?: number; b?: number}) : {}
-
-            if (toolName === 'calculate_sum') {
-                const result = Number(args.a) + Number(args.b)
-                return JSON.stringify({result, text: `${args.a} + ${args.b} = ${result}`})
-            }
-
-            if (toolName === 'get_today') {
-                return JSON.stringify({today: new Date().toISOString().slice(0, 10)})
-            }
-
-            return `Unknown tool: ${toolName}`
-        },
+        null,
         memories,
         (memoryName: string, sessionId: string, userMsg: string, assistantMsg: string): void => {
             const entries = getMemoryEntries(memoryName, sessionId)
