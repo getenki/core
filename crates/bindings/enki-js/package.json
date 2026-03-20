@@ -1,12 +1,17 @@
 {
   "name": "@getenki/ai",
-  "version": "0.2.1",
-  "description": "Template project for writing node package with napi-rs",
+  "version": "0.2.5",
+  "description": "Node.js bindings for Enki AI, a high-performance AI inference engine written in Rust.",
   "main": "index.js",
   "types": "index.d.ts",
+  "author": {
+    "email": "info@getenki.com",
+    "name": "Enki AI Team",
+    "url": "https://getenki.com"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/getenki/core.git"
+    "url": "https://github.com/getenki/core"
   },
   "license": " Apache License V2",
   "keywords": [
