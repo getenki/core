@@ -36,8 +36,8 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: yarn
-          cache-dependency-path: crates/bindings/enki-js/yarn.lock
+          cache: npm
+          cache-dependency-path: crates/bindings/enki-js/npm.lock
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -45,9 +45,9 @@ jobs:
       - name: Remove unpublished optional native packages for CI
         run: npm pkg delete optionalDependencies
       - name: Install dependencies
-        run: yarn install --no-immutable
+        run: npm install --no-immutable
       - name: Oxlint
-        run: yarn lint
+        run: npm lint
       - name: Cargo fmt
         run: cargo fmt -- --check
       - name: Clippy
@@ -58,19 +58,19 @@ jobs:
       matrix:
         settings:
           - host: windows-latest
-            build: yarn build --target x86_64-pc-windows-msvc
+            build: npm build --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
           - host: windows-latest
-            build: yarn build --target aarch64-pc-windows-msvc
+            build: npm build --target aarch64-pc-windows-msvc
             target: aarch64-pc-windows-msvc
           - host: macos-14
-            build: yarn build --target aarch64-apple-darwin
+            build: npm build --target aarch64-apple-darwin
             target: aarch64-apple-darwin
           - host: ubuntu-24.04
-            build: yarn build --target x86_64-unknown-linux-gnu
+            build: npm build --target x86_64-unknown-linux-gnu
             target: x86_64-unknown-linux-gnu
           - host: ubuntu-24.04-arm
-            build: yarn build --target aarch64-unknown-linux-gnu
+            build: npm build --target aarch64-unknown-linux-gnu
             target: aarch64-unknown-linux-gnu
     name: stable - ${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
@@ -80,8 +80,8 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: yarn
-          cache-dependency-path: crates/bindings/enki-js/yarn.lock
+          cache: npm
+          cache-dependency-path: crates/bindings/enki-js/npm.lock
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -116,7 +116,7 @@ jobs:
       - name: Remove unpublished optional native packages for CI
         run: npm pkg delete optionalDependencies
       - name: Install dependencies
-        run: yarn install --no-immutable
+        run: npm install --no-immutable
       - name: Build
         run: ${{ matrix.settings.build }}
         shell: bash
@@ -158,13 +158,13 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
-          cache: yarn
-          cache-dependency-path: crates/bindings/enki-js/yarn.lock
+          cache: npm
+          cache-dependency-path: crates/bindings/enki-js/npm.lock
           architecture: ${{ matrix.settings.architecture }}
       - name: Remove unpublished optional native packages for CI
         run: npm pkg delete optionalDependencies
       - name: Install dependencies
-        run: yarn install --no-immutable
+        run: npm install --no-immutable
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
@@ -174,7 +174,7 @@ jobs:
         run: ls -R .
         shell: bash
       - name: Test bindings
-        run: yarn test
+        run: npm test
   publish:
     name: Publish
     runs-on: ubuntu-latest
@@ -202,8 +202,8 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org/
-          cache: yarn
-          cache-dependency-path: crates/bindings/enki-js/yarn.lock
+          cache: npm
+          cache-dependency-path: crates/bindings/enki-js/npm.lock
 
       - name: Backup package manifest
         run: cp package.json package.json.ci-backup
@@ -213,14 +213,14 @@ jobs:
         run: npm pkg delete optionalDependencies
 
       - name: Install dependencies
-        run: yarn install --no-immutable
+        run: npm install --no-immutable
 
       - name: Restore package manifest
         run: mv -f package.json.ci-backup package.json
         shell: bash
 
       - name: Create npm dirs
-        run: yarn napi create-npm-dirs
+        run: npm napi create-npm-dirs
 
       - name: Download all artifacts
         uses: actions/download-artifact@v8
@@ -228,7 +228,7 @@ jobs:
           path: crates/bindings/enki-js/artifacts
 
       - name: Move artifacts
-        run: yarn artifacts
+        run: npm artifacts
 
       - name: List packages
         run: ls -R ./npm
@@ -238,7 +238,7 @@ jobs:
         run: npm whoami
 
       - name: Prepare packages for npm publish
-        run: yarn napi prepublish -t npm --no-gh-release
+        run: npm napi prepublish -t npm --no-gh-release
 
       - name: Publish
         shell: bash
