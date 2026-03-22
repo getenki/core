@@ -1,8 +1,10 @@
+use crate::registry::AgentRegistry;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub type ToolRegistry = BTreeMap<String, Box<dyn Tool>>;
 
@@ -11,6 +13,43 @@ pub struct ToolContext {
     pub agent_dir: PathBuf,
     pub workspace_dir: PathBuf,
     pub sessions_dir: PathBuf,
+    pub delegation: Option<DelegationContext>,
+}
+
+/// Provides delegation capabilities to tools in a multi-agent runtime.
+///
+/// When an agent is part of a `MultiAgentRuntime`, the runtime injects a
+/// `DelegationContext` so that delegation tools can discover peers and
+/// route requests without the agent holding direct references to others.
+#[derive(Clone)]
+pub struct DelegationContext {
+    pub registry: Arc<AgentRegistry>,
+    pub self_agent_id: String,
+    delegate_fn: Arc<dyn DelegateFn>,
+}
+
+/// Async function that the runtime provides for sending a task to a peer.
+#[async_trait(?Send)]
+pub trait DelegateFn: 'static {
+    async fn delegate(&self, target_agent_id: &str, task: &str) -> Result<String, String>;
+}
+
+impl DelegationContext {
+    pub fn new(
+        registry: Arc<AgentRegistry>,
+        self_agent_id: impl Into<String>,
+        delegate_fn: Arc<dyn DelegateFn>,
+    ) -> Self {
+        Self {
+            registry,
+            self_agent_id: self_agent_id.into(),
+            delegate_fn,
+        }
+    }
+
+    pub async fn delegate(&self, target_agent_id: &str, task: &str) -> Result<String, String> {
+        self.delegate_fn.delegate(target_agent_id, task).await
+    }
 }
 
 pub trait IntoToolOutput {
@@ -116,6 +155,7 @@ mod tests {
             agent_dir: PathBuf::from("agent"),
             workspace_dir: PathBuf::from("workspace"),
             sessions_dir: PathBuf::from("sessions"),
+            delegation: None,
         }
     }
 

@@ -5,5 +5,6 @@ pub mod agent;
 pub mod llm;
 pub mod memory;
 pub mod message;
+pub mod registry;
 pub mod runtime;
 pub mod tooling;
