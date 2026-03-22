@@ -67,6 +67,7 @@ impl AgentWorkspace {
             agent_dir: self.agent_dir.clone(),
             workspace_dir: self.task_dir(session_id),
             sessions_dir: self.sessions_dir.clone(),
+            delegation: None,
         }
     }
 }
