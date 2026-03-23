@@ -8,6 +8,27 @@ export declare class NativeEnkiAgent {
   run(sessionId: string, userMessage: string): Promise<unknown>
 }
 
+export declare class NativeMultiAgentRuntime {
+  constructor(members: Array<JsMultiAgentMember>, workspaceHome?: string | undefined | null)
+  process(agentId: string, sessionId: string, userMessage: string): Promise<unknown>
+  registry(): Promise<unknown>
+  discover(capability?: string | undefined | null, status?: JsAgentStatus | undefined | null): Promise<unknown>
+}
+
+export interface JsAgentCard {
+  agentId: string
+  name: string
+  description: string
+  capabilities: Array<string>
+  status: JsAgentStatus
+}
+
+export declare const enum JsAgentStatus {
+  Online = 'Online',
+  Busy = 'Busy',
+  Offline = 'Offline'
+}
+
 export interface JsMemoryEntry {
   key: string
   content: string
@@ -25,4 +46,13 @@ export declare const enum JsMemoryKind {
 
 export interface JsMemoryModule {
   name: string
+}
+
+export interface JsMultiAgentMember {
+  agentId: string
+  name: string
+  systemPromptPreamble?: string
+  model?: string
+  maxIterations?: number
+  capabilities: Array<string>
 }

@@ -5,6 +5,8 @@ use core_next::agent::{Agent as CoreAgent, AgentDefinition};
 use core_next::memory::{
   MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
 };
+use core_next::registry::{AgentCard, AgentStatus, DiscoverQuery};
+use core_next::runtime::MultiAgentRuntime;
 use core_next::tooling::tool_calling::RegistryToolExecutor;
 use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
 use napi::bindgen_prelude::{AsyncTask, FnArgs, Function, JsObjectValue, Object, Unknown};
@@ -64,10 +66,31 @@ struct AgentHandle {
   request_tx: Mutex<mpsc::Sender<RunRequest>>,
 }
 
+struct MultiAgentHandle {
+  request_tx: Mutex<mpsc::Sender<MultiAgentRequest>>,
+}
+
 pub struct RunTask {
   inner: Arc<AgentHandle>,
   session_id: String,
   user_message: String,
+}
+
+pub struct MultiAgentProcessTask {
+  inner: Arc<MultiAgentHandle>,
+  agent_id: String,
+  session_id: String,
+  user_message: String,
+}
+
+pub struct MultiAgentRegistryTask {
+  inner: Arc<MultiAgentHandle>,
+}
+
+pub struct MultiAgentDiscoverTask {
+  inner: Arc<MultiAgentHandle>,
+  capability: Option<String>,
+  status: Option<JsAgentStatus>,
 }
 
 struct JsTool {
@@ -155,12 +178,36 @@ struct MemorySessionInvocation {
   session_id: String,
 }
 
+enum MultiAgentRequest {
+  Process {
+    agent_id: String,
+    session_id: String,
+    user_message: String,
+    reply_tx: mpsc::Sender<Result<String, String>>,
+  },
+  Registry {
+    reply_tx: mpsc::Sender<Result<Vec<JsAgentCard>, String>>,
+  },
+  Discover {
+    capability: Option<String>,
+    status: Option<JsAgentStatus>,
+    reply_tx: mpsc::Sender<Result<Vec<JsAgentCard>, String>>,
+  },
+}
+
 #[napi(string_enum)]
 pub enum JsMemoryKind {
   RecentMessage,
   Summary,
   Entity,
   Preference,
+}
+
+#[napi(string_enum)]
+pub enum JsAgentStatus {
+  Online,
+  Busy,
+  Offline,
 }
 
 struct ResolvedToolDefinition {
@@ -173,6 +220,25 @@ struct ResolvedToolDefinition {
 enum JsToolHandler {
   PerTool(ToolHandler),
   Shared(SharedToolHandler),
+}
+
+#[napi(object)]
+pub struct JsMultiAgentMember {
+  pub agent_id: String,
+  pub name: String,
+  pub system_prompt_preamble: Option<String>,
+  pub model: Option<String>,
+  pub max_iterations: Option<u32>,
+  pub capabilities: Vec<String>,
+}
+
+#[napi(object)]
+pub struct JsAgentCard {
+  pub agent_id: String,
+  pub name: String,
+  pub description: String,
+  pub capabilities: Vec<String>,
+  pub status: JsAgentStatus,
 }
 
 #[napi(object)]
@@ -192,6 +258,11 @@ pub struct JsMemoryEntry {
 #[napi(js_name = "NativeEnkiAgent")]
 pub struct NativeEnkiAgent {
   inner: Arc<AgentHandle>,
+}
+
+#[napi(js_name = "NativeMultiAgentRuntime")]
+pub struct NativeMultiAgentRuntime {
+  inner: Arc<MultiAgentHandle>,
 }
 
 #[async_trait(?Send)]
@@ -438,6 +509,58 @@ impl NativeEnkiAgent {
   }
 }
 
+#[napi]
+impl NativeMultiAgentRuntime {
+  #[napi(constructor)]
+  pub fn new(
+    members: Vec<JsMultiAgentMember>,
+    workspace_home: Option<String>,
+  ) -> napi::Result<Self> {
+    let request_tx = spawn_multi_agent_worker(members, workspace_home)?;
+
+    Ok(Self {
+      inner: Arc::new(MultiAgentHandle {
+        request_tx: Mutex::new(request_tx),
+      }),
+    })
+  }
+
+  #[napi]
+  pub fn process(
+    &self,
+    agent_id: String,
+    session_id: String,
+    user_message: String,
+  ) -> AsyncTask<MultiAgentProcessTask> {
+    AsyncTask::new(MultiAgentProcessTask {
+      inner: Arc::clone(&self.inner),
+      agent_id,
+      session_id,
+      user_message,
+    })
+  }
+
+  #[napi]
+  pub fn registry(&self) -> AsyncTask<MultiAgentRegistryTask> {
+    AsyncTask::new(MultiAgentRegistryTask {
+      inner: Arc::clone(&self.inner),
+    })
+  }
+
+  #[napi]
+  pub fn discover(
+    &self,
+    capability: Option<String>,
+    status: Option<JsAgentStatus>,
+  ) -> AsyncTask<MultiAgentDiscoverTask> {
+    AsyncTask::new(MultiAgentDiscoverTask {
+      inner: Arc::clone(&self.inner),
+      capability,
+      status,
+    })
+  }
+}
+
 impl NativeEnkiAgent {
   fn build_from_options(build: BuildOptions, worker_config: WorkerConfig) -> napi::Result<Self> {
     Self::build(
@@ -524,6 +647,99 @@ impl Task for RunTask {
   }
 }
 
+impl Task for MultiAgentProcessTask {
+  type Output = String;
+  type JsValue = String;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = MultiAgentRequest::Process {
+      agent_id: self.agent_id.clone(),
+      session_id: self.session_id.clone(),
+      user_message: self.user_message.clone(),
+      reply_tx,
+    };
+
+    let sender =
+      self.inner.request_tx.lock().map_err(|_| {
+        napi::Error::from_reason("Worker error: request mutex poisoned".to_string())
+      })?;
+
+    sender.send(request).map_err(|_| {
+      napi::Error::from_reason("Worker error: multi-agent worker has stopped".to_string())
+    })?;
+
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+impl Task for MultiAgentRegistryTask {
+  type Output = Vec<JsAgentCard>;
+  type JsValue = Vec<JsAgentCard>;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = MultiAgentRequest::Registry { reply_tx };
+
+    let sender =
+      self.inner.request_tx.lock().map_err(|_| {
+        napi::Error::from_reason("Worker error: request mutex poisoned".to_string())
+      })?;
+
+    sender.send(request).map_err(|_| {
+      napi::Error::from_reason("Worker error: multi-agent worker has stopped".to_string())
+    })?;
+
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+impl Task for MultiAgentDiscoverTask {
+  type Output = Vec<JsAgentCard>;
+  type JsValue = Vec<JsAgentCard>;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = MultiAgentRequest::Discover {
+      capability: self.capability.clone(),
+      status: self.status.take(),
+      reply_tx,
+    };
+
+    let sender =
+      self.inner.request_tx.lock().map_err(|_| {
+        napi::Error::from_reason("Worker error: request mutex poisoned".to_string())
+      })?;
+
+    sender.send(request).map_err(|_| {
+      napi::Error::from_reason("Worker error: multi-agent worker has stopped".to_string())
+    })?;
+
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
 fn build_definition(
   name: Option<String>,
   system_prompt_preamble: Option<String>,
@@ -537,6 +753,21 @@ fn build_definition(
     model: model.unwrap_or_default(),
     max_iterations: max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS).max(1) as usize,
   }
+}
+
+fn build_multi_agent_definition(
+  member: JsMultiAgentMember,
+) -> (String, AgentDefinition, Vec<String>) {
+  (
+    member.agent_id,
+    build_definition(
+      Some(member.name),
+      member.system_prompt_preamble,
+      member.model,
+      member.max_iterations,
+    ),
+    member.capabilities,
+  )
 }
 
 fn build_tool_handler(
@@ -803,6 +1034,164 @@ fn spawn_agent_worker(
     .map_err(napi::Error::from_reason)?;
 
   Ok(request_tx)
+}
+
+fn spawn_multi_agent_worker(
+  members: Vec<JsMultiAgentMember>,
+  workspace_home: Option<String>,
+) -> napi::Result<mpsc::Sender<MultiAgentRequest>> {
+  if members.is_empty() {
+    return Err(napi::Error::from_reason(
+      "Multi-agent runtime requires at least one member".to_string(),
+    ));
+  }
+
+  let workspace_home = workspace_home.map(PathBuf::from);
+  let (request_tx, request_rx) = mpsc::channel::<MultiAgentRequest>();
+  let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
+
+  thread::spawn(move || {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+      .enable_all()
+      .build()
+    {
+      Ok(runtime) => runtime,
+      Err(error) => {
+        let _ = ready_tx.send(Err(format!(
+          "Initialization error: failed to create tokio runtime: {error}"
+        )));
+        for request in request_rx {
+          fail_multi_agent_request(
+            request,
+            "Initialization error: failed to create tokio runtime".to_string(),
+          );
+        }
+        return;
+      }
+    };
+
+    let mut builder = MultiAgentRuntime::builder();
+    if let Some(home) = workspace_home {
+      builder = builder.with_workspace_home(home);
+    }
+
+    for member in members {
+      let (agent_id, definition, capabilities) = build_multi_agent_definition(member);
+      builder = builder.add_agent(agent_id, definition, capabilities);
+    }
+
+    let runtime_instance = match runtime.block_on(builder.build()) {
+      Ok(runtime_instance) => runtime_instance,
+      Err(error) => {
+        let message = format!("Initialization error: {error}");
+        let _ = ready_tx.send(Err(message.clone()));
+        for request in request_rx {
+          fail_multi_agent_request(request, message.clone());
+        }
+        return;
+      }
+    };
+
+    let _ = ready_tx.send(Ok(()));
+
+    for request in request_rx {
+      match request {
+        MultiAgentRequest::Process {
+          agent_id,
+          session_id,
+          user_message,
+          reply_tx,
+        } => {
+          let response =
+            runtime.block_on(runtime_instance.process(&agent_id, &session_id, &user_message));
+          let _ = reply_tx.send(response);
+        }
+        MultiAgentRequest::Registry { reply_tx } => {
+          let cards = runtime
+            .block_on(runtime_instance.registry().list_all())
+            .into_iter()
+            .map(JsAgentCard::from)
+            .collect();
+          let _ = reply_tx.send(Ok(cards));
+        }
+        MultiAgentRequest::Discover {
+          capability,
+          status,
+          reply_tx,
+        } => {
+          let mut query = DiscoverQuery::new();
+          if let Some(capability) = capability {
+            query = query.with_capability(capability);
+          }
+          if let Some(status) = status {
+            query = query.with_status(status.into());
+          }
+
+          let cards = runtime
+            .block_on(runtime_instance.registry().discover(&query))
+            .into_iter()
+            .map(JsAgentCard::from)
+            .collect();
+          let _ = reply_tx.send(Ok(cards));
+        }
+      }
+    }
+  });
+
+  ready_rx
+    .recv()
+    .map_err(|_| {
+      napi::Error::from_reason("Initialization error: multi-agent worker exited".to_string())
+    })?
+    .map_err(napi::Error::from_reason)?;
+
+  Ok(request_tx)
+}
+
+fn fail_multi_agent_request(request: MultiAgentRequest, message: String) {
+  match request {
+    MultiAgentRequest::Process { reply_tx, .. } => {
+      let _ = reply_tx.send(Err(message));
+    }
+    MultiAgentRequest::Registry { reply_tx } => {
+      let _ = reply_tx.send(Err(message));
+    }
+    MultiAgentRequest::Discover { reply_tx, .. } => {
+      let _ = reply_tx.send(Err(message));
+    }
+  }
+}
+
+impl From<JsAgentStatus> for AgentStatus {
+  fn from(value: JsAgentStatus) -> Self {
+    match value {
+      JsAgentStatus::Online => AgentStatus::Online,
+      JsAgentStatus::Busy => AgentStatus::Busy,
+      JsAgentStatus::Offline => AgentStatus::Offline,
+    }
+  }
+}
+
+impl From<AgentStatus> for JsAgentStatus {
+  fn from(value: AgentStatus) -> Self {
+    match value {
+      AgentStatus::Online => JsAgentStatus::Online,
+      AgentStatus::Busy => JsAgentStatus::Busy,
+      AgentStatus::Offline => JsAgentStatus::Offline,
+    }
+  }
+}
+
+impl From<AgentCard> for JsAgentCard {
+  fn from(value: AgentCard) -> Self {
+    Self {
+      agent_id: value.agent_id,
+      name: value.name,
+      description: value.description,
+      capabilities: value.capabilities,
+      status: value.status.into(),
+    }
+  }
 }
 
 impl From<JsMemoryKind> for MemoryKind {
