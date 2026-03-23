@@ -22,7 +22,7 @@ uv add enki-py
 It exposes two layers:
 
 - A generated low-level API built around `EnkiAgent`, `EnkiTool`, and `EnkiToolHandler`
-- A higher-level Python wrapper in `enki_py.agent` that adds decorator-based tools, custom memory backends, dependency injection, and sync helpers
+- A higher-level Python wrapper in `enki_py.agent` that adds decorator-based tools, custom memory backends, dependency injection, sync helpers, and Python-native multi-agent orchestration
 
 ## What to use
 
@@ -62,6 +62,49 @@ if __name__ == "__main__":
     import asyncio
 
     asyncio.run(hello_enki())
+```
+
+## Multi-agent runtime
+
+The high-level wrapper also supports composing multiple Python `Agent` instances
+into a shared runtime with `discover_agents` and `delegate_task` tools injected
+automatically:
+
+```python
+from enki_py import Agent, MultiAgentMember, MultiAgentRuntime
+
+coordinator = Agent(
+    "ollama::qwen3.5:latest",
+    name="Coordinator",
+    instructions="Delegate research work when appropriate.",
+)
+
+researcher = Agent(
+    "ollama::qwen3.5:latest",
+    name="Researcher",
+    instructions="Handle research tasks and return concise answers.",
+)
+
+runtime = MultiAgentRuntime(
+    [
+        MultiAgentMember(
+            agent_id="coordinator",
+            agent=coordinator,
+            capabilities=["planning", "orchestration"],
+        ),
+        MultiAgentMember(
+            agent_id="researcher",
+            agent=researcher,
+            capabilities=["research"],
+        ),
+    ]
+)
+
+result = runtime.process_sync(
+    "coordinator",
+    "Find the answer and delegate research work if needed.",
+)
+print(result.output)
 ```
 
 Use the generated low-level API when you need exact control over tool specs and the tool handler callback:
