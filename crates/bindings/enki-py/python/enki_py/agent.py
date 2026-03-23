@@ -10,12 +10,40 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Generic, Optional, TypeVar, Union, get_args, get_origin
 
-from .enki_py import EnkiAgent as _LowLevelEnkiAgent
-from .enki_py import EnkiMemoryEntry as _LowLevelMemoryEntry
-from .enki_py import EnkiMemoryHandler
-from .enki_py import EnkiMemoryKind as _LowLevelMemoryKind
-from .enki_py import EnkiMemoryModule as _LowLevelMemoryModule
-from .enki_py import EnkiToolHandler
+try:
+    from .enki_py import EnkiAgent as _LowLevelEnkiAgent
+    from .enki_py import EnkiMemoryEntry as _LowLevelMemoryEntry
+    from .enki_py import EnkiMemoryHandler
+    from .enki_py import EnkiMemoryKind as _LowLevelMemoryKind
+    from .enki_py import EnkiMemoryModule as _LowLevelMemoryModule
+    from .enki_py import EnkiToolHandler
+except ImportError:  # pragma: no cover
+    class _LowLevelEnkiAgent:  # type: ignore[override]
+        pass
+
+    class _LowLevelMemoryKind(Enum):  # type: ignore[override]
+        RecentMessage = "RecentMessage"
+        Summary = "Summary"
+        Entity = "Entity"
+        Preference = "Preference"
+
+    @dataclass(frozen=True)
+    class _LowLevelMemoryEntry:  # type: ignore[override]
+        key: str
+        content: str
+        kind: _LowLevelMemoryKind
+        relevance: float
+        timestamp_ns: int
+
+    @dataclass(frozen=True)
+    class _LowLevelMemoryModule:  # type: ignore[override]
+        name: str
+
+    class EnkiToolHandler:  # type: ignore[override]
+        pass
+
+    class EnkiMemoryHandler:  # type: ignore[override]
+        pass
 try:
     from .enki_py import EnkiLlmHandler
 except ImportError:  # pragma: no cover
@@ -24,7 +52,14 @@ except ImportError:  # pragma: no cover
 try:
     from .enki_py import EnkiTool as _LowLevelTool
 except ImportError:  # pragma: no cover
-    from .enki_py import EnkiToolSpec as _LowLevelTool
+    try:
+        from .enki_py import EnkiToolSpec as _LowLevelTool
+    except ImportError:  # pragma: no cover
+        @dataclass(frozen=True)
+        class _LowLevelTool:  # type: ignore[override]
+            name: str
+            description: str
+            parameters_json: str
 try:
     from .enki_py.enki import uniffi_set_event_loop as _uniffi_set_event_loop
 except ImportError:  # pragma: no cover
@@ -43,6 +78,24 @@ class RunContext(Generic[DepsT]):
 @dataclass(frozen=True)
 class AgentRunResult:
     output: str
+
+
+@dataclass(frozen=True)
+class AgentCard:
+    agent_id: str
+    name: str
+    description: str
+    capabilities: list[str]
+    status: str = "online"
+
+
+@dataclass(frozen=True)
+class MultiAgentMember(Generic[DepsT]):
+    agent_id: str
+    agent: "Agent[DepsT]"
+    capabilities: list[str]
+    description: str | None = None
+    status: str = "online"
 
 
 class MemoryKind(str, Enum):
@@ -655,7 +708,125 @@ class Agent(Generic[DepsT]):
         return result_box["result"]
 
 
+class MultiAgentRuntime:
+    def __init__(self, members: list[MultiAgentMember[Any]]) -> None:
+        if not members:
+            raise ValueError("MultiAgentRuntime requires at least one agent")
+
+        self._members: dict[str, MultiAgentMember[Any]] = {}
+        for member in members:
+            if member.agent_id in self._members:
+                raise ValueError(f"Duplicate agent_id '{member.agent_id}'")
+            self._members[member.agent_id] = member
+
+        for member in members:
+            self._install_runtime_tools(member)
+
+    def _install_runtime_tools(self, member: MultiAgentMember[Any]) -> None:
+        for reserved_name in ("discover_agents", "delegate_task"):
+            if reserved_name in member.agent._tools:
+                raise ValueError(
+                    f"Agent '{member.agent_id}' already defines reserved tool '{reserved_name}'"
+                )
+
+        def discover_agents(
+            capability: str | None = None,
+            status: str | None = None,
+        ) -> list[dict[str, Any]]:
+            cards = self.discover(capability=capability, status=status)
+            return [card.__dict__ for card in cards if card.agent_id != member.agent_id]
+
+        def delegate_task(agent_id: str, task: str) -> str:
+            if agent_id == member.agent_id:
+                return "Error: cannot delegate a task to yourself."
+
+            target = self._members.get(agent_id)
+            if target is None:
+                return f"Error: agent '{agent_id}' not found in registry."
+
+            result = target.agent.run_sync(
+                task,
+                session_id=f"delegation-{agent_id}-{uuid.uuid4()}",
+            )
+            return result.output
+
+        member.agent.register_tool(
+            Tool.from_function(
+                discover_agents,
+                uses_context=False,
+                description=(
+                    "Discover peer agents registered in the runtime. "
+                    "Returns a JSON array of agent cards matching the query."
+                ),
+            )
+        )
+        member.agent.register_tool(
+            Tool.from_function(
+                delegate_task,
+                uses_context=False,
+                description=(
+                    "Delegate a task to another agent by its agent_id. "
+                    "Returns the peer agent's response."
+                ),
+            )
+        )
+
+    def registry(self) -> list[AgentCard]:
+        return [
+            AgentCard(
+                agent_id=member.agent_id,
+                name=member.agent.name,
+                description=member.description or member.agent.instructions,
+                capabilities=list(member.capabilities),
+                status=member.status,
+            )
+            for member in self._members.values()
+        ]
+
+    def discover(
+        self,
+        *,
+        capability: str | None = None,
+        status: str | None = None,
+    ) -> list[AgentCard]:
+        cards = self.registry()
+        if capability is not None:
+            cards = [
+                card
+                for card in cards
+                if any(candidate.lower() == capability.lower() for candidate in card.capabilities)
+            ]
+        if status is not None:
+            cards = [card for card in cards if card.status.lower() == status.lower()]
+        return cards
+
+    async def process(
+        self,
+        agent_id: str,
+        user_message: str,
+        *,
+        session_id: str | None = None,
+    ) -> AgentRunResult:
+        member = self._members.get(agent_id)
+        if member is None:
+            raise ValueError(f"Agent '{agent_id}' not found in runtime.")
+        return await member.agent.run(user_message, session_id=session_id)
+
+    def process_sync(
+        self,
+        agent_id: str,
+        user_message: str,
+        *,
+        session_id: str | None = None,
+    ) -> AgentRunResult:
+        member = self._members.get(agent_id)
+        if member is None:
+            raise ValueError(f"Agent '{agent_id}' not found in runtime.")
+        return member.agent.run_sync(user_message, session_id=session_id)
+
+
 __all__ = [
+    "AgentCard",
     "Agent",
     "AgentRunResult",
     "LlmProviderBackend",
@@ -663,6 +834,8 @@ __all__ = [
     "MemoryEntry",
     "MemoryKind",
     "MemoryModule",
+    "MultiAgentMember",
+    "MultiAgentRuntime",
     "RunContext",
     "Tool",
 ]
