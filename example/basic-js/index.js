@@ -1,111 +1,64 @@
-const {JsMemoryKind, NativeEnkiAgent} = require('@getenki/ai')
+const {JsAgentStatus, NativeMultiAgentRuntime} = require('@getenki/ai')
 
-const tools = [
-    {
-        id: 'calculate_sum',
-        description: 'Add two numbers and return a short text result.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                a: {type: 'number'},
-                b: {type: 'number'},
-            },
-            required: ['a', 'b'],
-        },
-        execute: (inputJson) => {
-            const args = inputJson ? JSON.parse(inputJson) : {}
-            const result = Number(args.a) + Number(args.b)
-            return JSON.stringify({result, text: `${args.a} + ${args.b} = ${result}`})
-        },
-    },
-    {
-        id: 'get_today',
-        description: 'Return the current local date in ISO format.',
-        inputSchema: {
-            type: 'object',
-            properties: {},
-        },
-        execute: () => JSON.stringify({today: new Date().toISOString().slice(0, 10)}),
-    },
-]
-
-const memories = [{name: 'example-memory'}]
-const memoryStore = new Map()
-
-function memoryKey(memoryName, sessionId) {
-    return `${memoryName}:${sessionId}`
-}
-
-function getMemoryEntries(memoryName, sessionId) {
-    const key = memoryKey(memoryName, sessionId)
-    const existing = memoryStore.get(key)
-    if (existing) {
-        return existing
+function printCards(label, cards) {
+    console.log(label)
+    for (const card of cards) {
+        console.log(
+            `- ${card.agentId} (${card.name}) capabilities=${card.capabilities.join(', ')} status=${card.status}`,
+        )
     }
-
-    const empty = []
-    memoryStore.set(key, empty)
-    return empty
 }
 
 async function main() {
-    const model = "ollama::qwen3.5:latest"
+    const model = process.env.ENKI_MODEL ?? 'ollama::qwen3.5:latest'
 
-    if (!model) {
-        throw new Error(
-            'Set ENKI_MODEL to a provider/model string, for example `ollama::qwen3.5` or `openai::gpt-4.1-mini`.',
-        )
-    }
-
-    const agent = NativeEnkiAgent.withToolsAndMemory(
-        'Basic JS Agent',
+    const runtime = new NativeMultiAgentRuntime(
         [
-            'Answer clearly and keep responses short.',
-            'Use the provided tools when arithmetic or the current date would help.',
-            'Use memory to remember stable user preferences between turns.',
-        ].join(' '),
-        model,
-        20,
+            {
+                agentId: 'coordinator',
+                name: 'Coordinator',
+                systemPromptPreamble: [
+                    'You are a coordinator agent.',
+                    'Use discover_agents to inspect peers.',
+                    'Use delegate_task when research or investigation should be handled by another agent.',
+                    'Keep the final answer concise.',
+                ].join(' '),
+                model,
+                maxIterations: 20,
+                capabilities: ['planning', 'orchestration'],
+            },
+            {
+                agentId: 'researcher',
+                name: 'Researcher',
+                systemPromptPreamble: [
+                    'You are a researcher agent.',
+                    'Handle delegated investigation tasks carefully and return short factual answers.',
+                ].join(' '),
+                model,
+                maxIterations: 20,
+                capabilities: ['research', 'analysis'],
+            },
+        ],
         process.cwd(),
-        tools,
-        null,
-        memories,
-        (memoryName, sessionId, userMsg, assistantMsg) => {
-            const entries = getMemoryEntries(memoryName, sessionId)
-            entries.push({
-                key: `entry-${entries.length + 1}`,
-                content: `User: ${userMsg}\nAssistant: ${assistantMsg}`,
-                kind: JsMemoryKind.RecentMessage,
-                relevance: 1,
-                timestampNs: `${Date.now() * 1000000}`,
-            })
-        },
-        (memoryName, sessionId, query, maxEntries) => {
-            const normalizedQuery = query.toLowerCase()
-
-            return getMemoryEntries(memoryName, sessionId)
-                .filter((entry) => entry.content.toLowerCase().includes(normalizedQuery))
-                .slice(-maxEntries)
-        },
-        (memoryName, sessionId) => {
-            memoryStore.delete(memoryKey(memoryName, sessionId))
-        },
-        () => {},
     )
 
-    const sessionId = 'basic-js-session'
+    const allCards = await runtime.registry()
+    printCards('Registered agents:', allCards)
 
-    const first = await agent.run(
-        sessionId,
-        'My favorite response style is concise. Please remember that. Also calculate 3 + 5.',
-    )
-    console.log('First run:\n', first)
+    const researchCards = await runtime.discover('research', JsAgentStatus.Online)
+    printCards('\nResearch-capable agents:', researchCards)
 
-    const second = await agent.run(
-        sessionId,
-        'What is today and what response style did I ask you to remember?',
+    const response = await runtime.process(
+        'coordinator',
+        'basic-js-multi-agent-session',
+        [
+            'Please use discover_agents first.',
+            'Then delegate_task to the researcher to answer this question: what is the purpose of this example?',
+            'Return the delegated answer and mention which agent handled it.',
+        ].join(' '),
     )
-    console.log('\nSecond run:\n', second)
+
+    console.log('\nCoordinator response:\n', response)
 }
 
 main().catch((error) => {
