@@ -12,9 +12,13 @@ This package is the current JavaScript surface. We are not publishing a WASM bin
 ## What it exposes
 
 - `NativeEnkiAgent`
+- `NativeMultiAgentRuntime`
+- `JsAgentStatus`
+- `JsAgentCard`
 - `JsMemoryKind`
 - `JsMemoryModule`
 - `JsMemoryEntry`
+- `JsMultiAgentMember`
 
 `NativeEnkiAgent` can be created in four modes:
 
@@ -189,13 +193,7 @@ Supported memory kinds:
 - `JsMemoryKind.Entity`
 - `JsMemoryKind.Preference`
 
-## Tools and memory example
-
-The repository examples in `example/basic-js/index.js` and `example/basic-ts/index.ts` use `NativeEnkiAgent.withToolsAndMemory(...)` with:
-
-- a `calculate_sum` tool
-- a `get_today` tool
-- an in-memory `Map` for session memory storage
+For multi-agent orchestration from Node.js, see [JavaScript Multi-Agent](/docs/javascript-multi-agent).
 
 ## Development
 

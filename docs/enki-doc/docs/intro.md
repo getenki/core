@@ -9,8 +9,8 @@ Enki is an async-first agent framework built around a Rust runtime, with binding
 
 This site tracks the current `core-next` workspace:
 
-- [Python](/docs/python): the published `enki-py` package, high-level `Agent` wrapper, low-level bindings, and memory APIs
-- [JavaScript](/docs/javascript): the published `@getenki/ai` native Node.js package with tools and memory support
+- [Python](/docs/python): the published `enki-py` package, high-level `Agent` wrapper, multi-agent runtime, low-level bindings, and memory APIs
+- [JavaScript](/docs/javascript): the published `@getenki/ai` native Node.js package with single-agent and multi-agent runtimes
 - [Rust](/docs/rust): the core runtime workspace, crate layout, and local build workflow
 
 ## Choose your entry point
@@ -31,7 +31,7 @@ Start here:
 
 ### JavaScript
 
-Use JavaScript when you want to run Enki from Node.js through the native `@getenki/ai` package.
+Use JavaScript when you want to run Enki from Node.js through the native `@getenki/ai` package, including multi-agent orchestration from JavaScript or TypeScript.
 
 Start here:
 

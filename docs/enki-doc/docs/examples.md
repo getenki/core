@@ -5,7 +5,7 @@ slug: /examples
 
 # Examples
 
-These examples show the main ways to use `enki-py`.
+These examples show the main ways to use `enki-py`, including the newer multi-agent flows added in the current workspace.
 
 ## Decorator-style tools
 
@@ -94,3 +94,11 @@ A larger end-to-end agent can combine:
 - multiple filesystem-oriented tools
 - safe path resolution inside the review root
 - a reusable `review_folder()` helper around `agent.run_sync()`
+
+## Repository examples
+
+The repository currently includes these runnable Python examples:
+
+- `example/enki-py/simple_agent.py`: minimal high-level `Agent` usage with `run_sync()`
+- `example/enki-py/simple_multi_agent.py`: coordinator plus researcher setup with `MultiAgentRuntime`
+- `example/enki-py/multi_agent_with_memory_and_tools.py`: shared memory backend, decorator tools, and delegated multi-agent execution
