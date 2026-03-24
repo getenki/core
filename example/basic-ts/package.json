@@ -8,6 +8,7 @@
   "main": "index.ts",
   "scripts": {
     "start": "tsx index.ts",
+    "start:multi-agent-tools-memory": "tsx multi-agent-tools-memory.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

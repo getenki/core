@@ -52,13 +52,13 @@ async function main(): Promise<void> {
 
     const runtime = new NativeMultiAgentRuntime(members, process.cwd())
 
-    const allCards = await runtime.registry()
+    const allCards = (await runtime.registry()) as JsAgentCard[]
     printCards('Registered agents:', allCards)
 
-    const researchCards = await runtime.discover('research', JsAgentStatus.Online)
+    const researchCards = (await runtime.discover('research', JsAgentStatus.Online)) as JsAgentCard[]
     printCards('\nResearch-capable agents:', researchCards)
 
-    const response = await runtime.process(
+    const response = String(await runtime.process(
         'coordinator',
         'basic-ts-multi-agent-session',
         [
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
             'Then delegate_task to the researcher to answer this question: what is the purpose of this example?',
             'Return the delegated answer and mention which agent handled it.',
         ].join(' '),
-    )
+    ))
 
     console.log('\nCoordinator response:\n', response)
 }

@@ -8,7 +8,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js"
+    "start": "node index.js",
+    "start:multi-agent-tools-memory": "node multi-agent-tools-memory.js"
   },
   "dependencies": {
     "@getenki/ai": "file:../../crates/bindings/enki-js"
