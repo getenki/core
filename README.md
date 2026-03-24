@@ -123,6 +123,36 @@ cargo run -p core -- session-1 "Summarize the repository structure"
 
 If you do not inject an LLM in code, the runtime resolves the model from `ENKI_MODEL`.
 
+## Examples
+
+The repository includes runnable examples under `example/`:
+
+- `example/basic-js/index.js`: basic JavaScript multi-agent runtime example
+- `example/basic-js/multi-agent-tools-memory.js`: JavaScript example with researcher/coordinator agents, tool calling, and shared memory
+- `example/basic-ts/index.ts`: basic TypeScript multi-agent runtime example
+- `example/basic-ts/multi-agent-tools-memory.ts`: TypeScript example with researcher/coordinator agents, tool calling, and shared memory
+- `example/enki-py/simple_agent.py`: basic Python single-agent example
+- `example/enki-py/simple_multi_agent.py`: basic Python multi-agent example
+- `example/enki-py/multi_agent_with_memory_and_tools.py`: Python multi-agent example with tools and shared memory
+
+Run the Node examples from their example directories:
+
+```powershell
+cd example/basic-js
+npm install
+npm start
+npm run start:multi-agent-tools-memory
+```
+
+```powershell
+cd example/basic-ts
+npm install
+npm start
+npm run start:multi-agent-tools-memory
+```
+
+These examples default to `ollama::qwen3.5:latest` unless `ENKI_MODEL` is set.
+
 ## Python API
 
 The published docs describe two Python layers:

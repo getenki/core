@@ -287,6 +287,13 @@ The repository examples in [`example/basic-js/index.js`](/I:/projects/enki/core-
 - a `get_today` tool
 - an in-memory `Map` for session memory storage
 
+There are also richer examples in [`example/basic-js/multi-agent-tools-memory.js`](/I:/projects/enki/core-next/example/basic-js/multi-agent-tools-memory.js) and [`example/basic-ts/multi-agent-tools-memory.ts`](/I:/projects/enki/core-next/example/basic-ts/multi-agent-tools-memory.ts). Those examples show:
+
+- a researcher agent with a custom `lookup_example_topics` tool
+- a coordinator agent consuming a researcher handoff via its own tool
+- shared in-process memory across both agents
+- progress logging so long-running model calls do not look stalled
+
 Minimal JavaScript version:
 
 ```js
@@ -410,6 +417,7 @@ JavaScript example:
 cd example/basic-js
 npm install
 npm start
+npm run start:multi-agent-tools-memory
 ```
 
 TypeScript example:
@@ -418,6 +426,7 @@ TypeScript example:
 cd example/basic-ts
 npm install
 npm start
+npm run start:multi-agent-tools-memory
 ```
 
 The checked-in examples currently hardcode `ollama::qwen3.5:latest` as the model, so make sure that model is available in your local provider before running them.
