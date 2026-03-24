@@ -1,11 +1,11 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-VERSION=$1
-TARGETS=$2 # Optional: e.g., "js,py" or "rs"
+VERSION=${1:-}
+TARGETS=${2:-} # Optional: e.g., "js,py" or "rs"
 
 # Usage help
-if [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+if [[ "$VERSION" == "-h" ]] || [[ "$VERSION" == "--help" ]]; then
   echo "Usage: ./release.sh [VERSION] [TARGETS]"
   echo "  VERSION: The new version string (e.g., 1.2.0)"
   echo "  TARGETS: Optional comma-separated list of targets: js, py, rs. If omitted, releases all."
@@ -43,7 +43,7 @@ fi
 
 if should_update "js"; then
   (cd ./crates/bindings/enki-js && npm install --no-save && npm version "$VERSION" --no-git-tag-version)
-  UPDATED_FILES+=" crates/bindings/enki-js/package.json Cargo.lock"
+  UPDATED_FILES+=" crates/bindings/enki-js/package.json crates/bindings/enki-js/package-lock.json"
   echo "✅ Updated package.json"
 fi
 
@@ -68,11 +68,12 @@ if [ -z "$TARGETS" ]; then
 else
   IFS=',' read -ra ADDR <<< "$TARGETS"
   for i in "${ADDR[@]}"; do
-    git tag "$i/v$VERSION" # Trigger specific
-    echo "🏷️  Created selective tag: $i/v$VERSION"
+    git tag "$i-v$VERSION" # Trigger specific
+    echo "🏷️  Created selective tag: $i-v$VERSION"
   done
 fi
 
 # 4. Push
-git push origin master --tags
-echo "🎉 Release $VERSION dispatched to GitHub!"
+current_branch=$(git branch --show-current)
+git push origin "$current_branch" --tags
+echo "🎉 Release $VERSION dispatched to GitHub from branch $current_branch!"
