@@ -12,7 +12,9 @@ on:
       - master
       - devops-release
     tags:
-      - '*'
+      - 'v*'
+      - 'py-v*'
+      - 'py/**'
   pull_request:
   workflow_dispatch:
 

@@ -80,8 +80,8 @@ if [[ -z "$TARGETS" ]]; then
 else
   IFS=',' read -r -a selected_targets <<< "$TARGETS"
   for target in "${selected_targets[@]}"; do
-    git tag "$target/v$VERSION"
-    echo "Created selective tag: $target/v$VERSION"
+    git tag "$target-v$VERSION"
+    echo "Created selective tag: $target-v$VERSION"
   done
 fi
 
