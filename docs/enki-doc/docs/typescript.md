@@ -10,9 +10,13 @@ Use `@getenki/ai` from TypeScript when you want typed access to Enki's native No
 The generated declarations currently expose:
 
 - `NativeEnkiAgent`
+- `NativeMultiAgentRuntime`
+- `JsAgentStatus`
+- `JsAgentCard`
 - `JsMemoryKind`
 - `JsMemoryModule`
 - `JsMemoryEntry`
+- `JsMultiAgentMember`
 
 ## Install
 
@@ -152,11 +156,4 @@ const agent = NativeEnkiAgent.withToolsAndMemory(
 )
 ```
 
-## Source examples
-
-The repository includes end-to-end examples in:
-
-- `example/basic-js/index.js`
-- `example/basic-ts/index.ts`
-
-Both examples use `NativeEnkiAgent.withToolsAndMemory(...)` with local tools and in-memory session memory.
+For typed multi-agent orchestration, see [TypeScript Multi-Agent](/docs/typescript-multi-agent).

@@ -6,6 +6,7 @@ const sidebars = {
             label: "Python",
             items: [
                 "python",
+                "python-multi-agent",
                 "installation",
                 "agent-wrapper",
                 "memory-backends",
@@ -20,7 +21,15 @@ const sidebars = {
             label: "JavaScript",
             items: [
                 "javascript",
-                "typescript"
+                "javascript-multi-agent"
+            ]
+        },
+        {
+            type: "category",
+            label: "TypeScript",
+            items: [
+                "typescript",
+                "typescript-multi-agent"
             ]
         },
         {

@@ -64,48 +64,9 @@ if __name__ == "__main__":
     asyncio.run(hello_enki())
 ```
 
-## Multi-agent runtime
+## Low-Level API
 
-The high-level wrapper also supports composing multiple Python `Agent` instances
-into a shared runtime with `discover_agents` and `delegate_task` tools injected
-automatically:
-
-```python
-from enki_py import Agent, MultiAgentMember, MultiAgentRuntime
-
-coordinator = Agent(
-    "ollama::qwen3.5:latest",
-    name="Coordinator",
-    instructions="Delegate research work when appropriate.",
-)
-
-researcher = Agent(
-    "ollama::qwen3.5:latest",
-    name="Researcher",
-    instructions="Handle research tasks and return concise answers.",
-)
-
-runtime = MultiAgentRuntime(
-    [
-        MultiAgentMember(
-            agent_id="coordinator",
-            agent=coordinator,
-            capabilities=["planning", "orchestration"],
-        ),
-        MultiAgentMember(
-            agent_id="researcher",
-            agent=researcher,
-            capabilities=["research"],
-        ),
-    ]
-)
-
-result = runtime.process_sync(
-    "coordinator",
-    "Find the answer and delegate research work if needed.",
-)
-print(result.output)
-```
+For multi-agent orchestration with Python `Agent` instances, see [Python Multi-Agent](/docs/python-multi-agent).
 
 Use the generated low-level API when you need exact control over tool specs and the tool handler callback:
 
@@ -124,6 +85,7 @@ agent = enki_py.EnkiAgent(
 ## Python docs
 
 - [Installation](/docs/installation)
+- [Python Multi-Agent](/docs/python-multi-agent)
 - [Getting Started Guide](/docs/agent-wrapper)
 - [Memory Backends](/docs/memory-backends)
 - [Memory Examples](/docs/memory-examples)
