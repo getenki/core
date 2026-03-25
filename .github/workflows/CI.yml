@@ -77,7 +77,7 @@ jobs:
           path: ${{ env.PYTHON_ARTIFACT_DIR }}
 
   musllinux:
-    #if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ false }}
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
