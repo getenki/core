@@ -1,9 +1,11 @@
+import os
+
 from enki_py import Agent
 
-
+print(os.environ["ANTHROPIC_API_KEY"])
 def main() -> None:
     agent = Agent(
-        "ollama::qwen3.5:latest",
+        "anthropic::claude-sonnet-4-6",
         name="Simple Agent",
         instructions="Answer clearly and keep responses short.",
     )

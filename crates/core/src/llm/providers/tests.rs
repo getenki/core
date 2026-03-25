@@ -1,5 +1,7 @@
 use super::backend::{get_api_key_env_var, parse_backend};
+use super::client::UniversalLLMClient;
 use super::config::UniversalConfig;
+use super::types::{ChatMessage, LlmConfig, LlmProvider, LlmResponse, LlmUsage, MessageRole};
 use llm::builder::LLMBackend;
 
 #[test]
@@ -14,6 +16,83 @@ fn test_universal_config_simple_model() {
     let config = UniversalConfig::new("openai::gpt-4o");
     assert_eq!(config.provider(), Some("openai"));
     assert_eq!(config.model_name(), "gpt-4o");
+}
+
+#[test]
+fn test_universal_config_openai_with_simple_prompt() {
+    let prompt = "Return exactly the word 'Hello' and nothing else.";
+    let config = UniversalConfig::new("openai::gpt-4o").with_system(prompt);
+    let result = LlmResponse {
+        content: "Hello".to_string(),
+        usage: Some(LlmUsage {
+            prompt_tokens: Some(12),
+            completion_tokens: Some(1),
+            total_tokens: Some(13),
+        }),
+        tool_calls: Vec::new(),
+        model: "openai::gpt-4o".to_string(),
+        finish_reason: Some("stop".to_string()),
+    };
+
+    assert_eq!(config.provider(), Some("openai"));
+    assert_eq!(config.model_name(), "gpt-4o");
+    assert_eq!(config.system.as_deref(), Some(prompt));
+    assert_eq!(result.content, "Hello");
+    assert_eq!(result.model, "openai::gpt-4o");
+    assert_eq!(result.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(result.usage.as_ref().and_then(|usage| usage.total_tokens), Some(13));
+}
+
+#[tokio::test]
+#[ignore = "requires OPENAI_API_KEY and outbound network access"]
+async fn test_openai_live_completion_returns_result() {
+    assert!(
+        std::env::var("OPENAI_API_KEY").is_ok(),
+        "OPENAI_API_KEY must be set to run this live test"
+    );
+
+    let client = UniversalLLMClient::new("openai::gpt-4o-mini")
+        .expect("OpenAI client should initialize when OPENAI_API_KEY is set");
+    let messages = vec![ChatMessage {
+        role: MessageRole::User,
+        content: "Reply with exactly: Hello from OpenAI test.".to_string(),
+        tool_call_id: None,
+    }];
+
+    let result = client
+        .complete(&messages, &LlmConfig::default())
+        .await
+        .expect("OpenAI completion should succeed");
+
+    println!("OpenAI result: {}", result.content);
+
+    assert!(!result.content.trim().is_empty());
+}
+
+#[tokio::test]
+#[ignore = "requires ANTHROPIC_API_KEY and outbound network access"]
+async fn test_anthropic_live_completion_returns_result() {
+    assert!(
+        std::env::var("ANTHROPIC_API_KEY").is_ok(),
+        "ANTHROPIC_API_KEY must be set to run this live test"
+    );
+
+    let client = UniversalLLMClient::new("anthropic::claude-sonnet-4-6")
+        .expect("Anthropic client should initialize when ANTHROPIC_API_KEY is set");
+    let messages = vec![ChatMessage {
+        role: MessageRole::User,
+        content: "Reply with exactly: Hello from Anthropic test2. and what is 2+2".to_string(),
+        tool_call_id: None,
+    }];
+
+    let result = client
+        .complete(&messages, &LlmConfig::default())
+        .await
+        .expect("Anthropic completion should succeed");
+
+    println!("Anthropic result: {}", result.content);
+
+    assert!(!result.content.trim().is_empty());
 }
 
 #[test]
