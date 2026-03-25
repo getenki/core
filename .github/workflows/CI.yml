@@ -29,7 +29,7 @@ env:
 
 jobs:
   linux:
-    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
+    #if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -53,6 +53,9 @@ jobs:
           python-version: 3.x
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          CFLAGS_aarch64_unknown_linux_gnu: ${{ matrix.platform.target == 'aarch64' && '-D__ARM_ARCH=8' || '' }}
+          CFLAGS_armv7_unknown_linux_gnueabihf: ${{ matrix.platform.target == 'armv7' && '-D__ARM_ARCH=7' || '' }}
         with:
           target: ${{ matrix.platform.target }}
           args: --manifest-path ${{ env.PYTHON_MANIFEST_PATH }} --release --out ${{ env.PYTHON_ARTIFACT_DIR }} --find-interpreter
@@ -86,6 +89,9 @@ jobs:
           python-version: 3.x
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          CFLAGS_aarch64_unknown_linux_gnu: ${{ matrix.platform.target == 'aarch64' && '-D__ARM_ARCH=8' || '' }}
+          CFLAGS_armv7_unknown_linux_gnueabihf: ${{ matrix.platform.target == 'armv7' && '-D__ARM_ARCH=7' || '' }}
         with:
           target: ${{ matrix.platform.target }}
           args: --manifest-path ${{ env.PYTHON_MANIFEST_PATH }} --release --out ${{ env.PYTHON_ARTIFACT_DIR }} --find-interpreter
