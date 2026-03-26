@@ -6,6 +6,10 @@ edition.workspace = true
 [lib]
 name = "core_next"
 
+[features]
+default = []
+universal-llm-provider = ["dep:llm"]
+
 [dependencies]
 async-trait.workspace = true
 futures.workspace = true
@@ -14,7 +18,7 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-llm.workspace = true
+llm = { workspace = true, optional = true }
 tokio.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

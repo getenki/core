@@ -1,9 +1,9 @@
 mod workspace;
 
 use crate::agent::workspace::AgentWorkspace;
-use crate::llm::{
-    ChatMessage, LlmConfig, LlmProvider, MessageRole, ToolDefinition, UniversalLLMClient,
-};
+use crate::llm::{ChatMessage, LlmConfig, LlmProvider, MessageRole, ToolDefinition};
+#[cfg(all(not(target_arch = "wasm32"), feature = "universal-llm-provider"))]
+use crate::llm::UniversalLLMClient;
 use crate::memory::MemoryManager;
 use crate::message::IndexedValue;
 use crate::message::{Message, next_request_id};
@@ -184,7 +184,17 @@ impl Agent {
             Some(llm) => llm,
             None => {
                 let model = Self::resolve_model(&definition)?;
-                Box::new(UniversalLLMClient::new(&model).map_err(|e| e.to_string())?)
+                #[cfg(all(not(target_arch = "wasm32"), feature = "universal-llm-provider"))]
+                {
+                    Box::new(UniversalLLMClient::new(&model).map_err(|e| e.to_string())?)
+                }
+
+                #[cfg(any(target_arch = "wasm32", not(feature = "universal-llm-provider")))]
+                {
+                    return Err(format!(
+                        "No built-in LLM provider is available for model `{model}`. Supply a custom LlmProvider or enable the `universal-llm-provider` feature."
+                    ));
+                }
             }
         };
 

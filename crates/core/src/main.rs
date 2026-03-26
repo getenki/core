@@ -1,7 +1,9 @@
+#[cfg(feature = "universal-llm-provider")]
 use core_next::llm::UniversalLLMClient;
 use core_next::runtime::{CliChannel, RuntimeBuilder};
 use std::env;
 
+#[cfg(feature = "universal-llm-provider")]
 #[tokio::main]
 async fn main() {
     let runtime = match RuntimeBuilder::for_default_agent()
@@ -35,4 +37,12 @@ async fn main() {
         eprintln!("{e}");
         std::process::exit(1);
     }
+}
+
+#[cfg(not(feature = "universal-llm-provider"))]
+fn main() {
+    eprintln!(
+        "The built-in universal LLM provider is disabled. Rebuild with the `universal-llm-provider` feature or inject a custom LlmProvider."
+    );
+    std::process::exit(1);
 }
