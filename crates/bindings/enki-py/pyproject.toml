@@ -16,6 +16,12 @@ dependencies = [
     "uniffi-bindgen>=0.31.0",
 ]
 [project.optional-dependencies]
+litellm = [
+    "litellm",
+]
+default-llm = [
+    "litellm",
+]
 tests = [
     "pytest",
 ]

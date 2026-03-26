@@ -1,4 +1,3 @@
-
 [package]
 authors = ["LongYinan <lynweklm@gmail.com>"]
 edition.workspace = true
@@ -11,7 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "3.0.0", features = ["tokio_rt", "napi4"] }
 napi-derive = "3.0.0"
-core_next = { package = "core", path = "../../core" }
+core_next = { package = "core", path = "../../core", features = ["default", "universal-llm-provider"] }
 async-trait = "0.1"
 serde_json = "1"
 tokio.workspace = true

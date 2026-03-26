@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect
 import json
+import os
 import threading
 import uuid
 from abc import ABC, abstractmethod
@@ -21,11 +23,13 @@ except ImportError:  # pragma: no cover
     class _LowLevelEnkiAgent:  # type: ignore[override]
         pass
 
+
     class _LowLevelMemoryKind(Enum):  # type: ignore[override]
         RecentMessage = "RecentMessage"
         Summary = "Summary"
         Entity = "Entity"
         Preference = "Preference"
+
 
     @dataclass(frozen=True)
     class _LowLevelMemoryEntry:  # type: ignore[override]
@@ -35,12 +39,15 @@ except ImportError:  # pragma: no cover
         relevance: float
         timestamp_ns: int
 
+
     @dataclass(frozen=True)
     class _LowLevelMemoryModule:  # type: ignore[override]
         name: str
 
+
     class EnkiToolHandler:  # type: ignore[override]
         pass
+
 
     class EnkiMemoryHandler:  # type: ignore[override]
         pass
@@ -64,7 +71,6 @@ try:
     from .enki_py.enki import uniffi_set_event_loop as _uniffi_set_event_loop
 except ImportError:  # pragma: no cover
     _uniffi_set_event_loop = None
-
 
 DepsT = TypeVar("DepsT")
 _CALLBACK_EVENT_LOOP: asyncio.AbstractEventLoop | None = None
@@ -143,13 +149,13 @@ class Tool:
 
     @classmethod
     def from_function(
-        cls,
-        func: Callable[..., Any],
-        *,
-        uses_context: bool,
-        name: str | None = None,
-        description: str | None = None,
-        parameters_json: str | None = None,
+            cls,
+            func: Callable[..., Any],
+            *,
+            uses_context: bool,
+            name: str | None = None,
+            description: str | None = None,
+            parameters_json: str | None = None,
     ) -> Tool:
         tool_name = name or func.__name__
         tool_description = description or inspect.getdoc(func) or ""
@@ -207,10 +213,10 @@ class MemoryBackend(ABC):
 
     @abstractmethod
     def recall(
-        self,
-        session_id: str,
-        query: str,
-        max_entries: int,
+            self,
+            session_id: str,
+            query: str,
+            max_entries: int,
     ) -> Any:
         """Return entries relevant to the current query.
 
@@ -247,26 +253,205 @@ class LlmProviderBackend(ABC):
 
     @abstractmethod
     def complete(
-        self,
-        model: str,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
+            self,
+            model: str,
+            messages: list[dict[str, Any]],
+            tools: list[dict[str, Any]],
     ) -> Any:
         """Return either a plain string or a response object/dict."""
 
 
+class LiteLlmProvider(LlmProviderBackend):
+    """Python-side LiteLLM adapter.
+
+    This keeps model/provider selection outside Rust and routes requests through
+    ``litellm.completion``.
+    """
+
+    def __init__(self, **default_kwargs: Any) -> None:
+        self._default_kwargs = default_kwargs
+
+    def complete(
+            self,
+            model: str,
+            messages: list[dict[str, Any]],
+            tools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        try:
+            litellm = importlib.import_module("litellm")
+        except ModuleNotFoundError as error:
+            raise RuntimeError(
+                "LiteLLM is not installed. Install it with `pip install litellm` "
+                "or pass a custom `llm=` provider."
+            ) from error
+
+        provider_name, normalized_model = self._normalize_model(model)
+        payload: dict[str, Any] = {
+            "model": normalized_model,
+            "messages": [
+                normalized_message
+                for message in messages
+                if (
+                    normalized_message := self._normalize_message(
+                        message, provider_name=provider_name
+                    )
+                )
+                is not None
+            ],
+        }
+        if tools and self._should_send_tools(provider_name):
+            payload["tools"] = [self._normalize_tool(tool) for tool in tools]
+        payload.update(self._provider_defaults(provider_name))
+        payload.update(self._default_kwargs)
+
+        response = litellm.completion(**payload)
+        return self._normalize_response(response, normalized_model)
+
+    @staticmethod
+    def _normalize_model(model: str) -> tuple[str | None, str]:
+        if "::" not in model:
+            if "/" in model:
+                provider, _backend_model = model.split("/", 1)
+                return provider.strip().lower(), model
+            return None, model
+
+        provider, backend_model = model.split("::", 1)
+        provider = provider.strip().lower()
+        backend_model = backend_model.strip()
+
+        if not provider or not backend_model:
+            return None, model
+
+        aliases = {
+            "azure-openai": "azure",
+            "azure_openai": "azure",
+            "azureopenai": "azure",
+            "x.ai": "xai",
+        }
+        provider = aliases.get(provider, provider)
+        return provider, f"{provider}/{backend_model}"
+
+    @staticmethod
+    def _provider_defaults(provider_name: str | None) -> dict[str, Any]:
+        timeout = float(os.getenv("ENKI_LITELLM_TIMEOUT", "60"))
+        if provider_name == "ollama":
+            return {
+                "api_base": (
+                    os.getenv("OLLAMA_URL") or "http://127.0.0.1:11434"
+                ).rstrip("/"),
+                "timeout": timeout,
+            }
+        return {"timeout": timeout}
+
+    @staticmethod
+    def _should_send_tools(provider_name: str | None) -> bool:
+        if provider_name == "ollama":
+            return os.getenv("ENKI_OLLAMA_TOOLS", "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        return True
+
+    @staticmethod
+    def _normalize_message(
+        message: dict[str, Any],
+        *,
+        provider_name: str | None,
+    ) -> dict[str, Any] | None:
+        role = str(message.get("role", "user")).lower()
+        content = message.get("content", "")
+        tool_call_id = message.get("tool_call_id")
+
+        if role == "tool":
+            if tool_call_id:
+                content = f"Tool result (tool_call_id={tool_call_id}): {content}"
+            else:
+                content = f"Tool result: {content}"
+
+            return {
+                "role": "user",
+                "content": content,
+            }
+
+        if role == "assistant" and not content:
+            return None
+
+        normalized = {
+            "role": role,
+            "content": content,
+        }
+
+        if provider_name == "openai" and tool_call_id:
+            normalized["tool_call_id"] = tool_call_id
+
+        return normalized
+
+    @staticmethod
+    def _normalize_tool(tool: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.get("name", ""),
+                "description": tool.get("description"),
+                "parameters": tool.get("parameters", {"type": "object", "properties": {}}),
+            },
+        }
+
+    @classmethod
+    def _normalize_response(cls, response: Any, model: str) -> dict[str, Any]:
+        if hasattr(response, "model_dump"):
+            payload = response.model_dump()
+        elif isinstance(response, dict):
+            payload = response
+        else:
+            payload = dict(response)
+
+        choices = payload.get("choices") or []
+        if not choices:
+            return {
+                "content": "",
+                "tool_calls": [],
+                "model": payload.get("model", model),
+                "finish_reason": payload.get("finish_reason", "stop"),
+            }
+
+        message = choices[0].get("message", {}) or {}
+        return {
+            "content": message.get("content") or "",
+            "tool_calls": [
+                json.dumps(tool_call)
+                for tool_call in (message.get("tool_calls") or [])
+            ],
+            "model": payload.get("model", model),
+            "finish_reason": choices[0].get("finish_reason", "stop"),
+        }
+
+
 class _PythonLlmHandler(EnkiLlmHandler):
-    def __init__(self, provider: "LlmProviderBackend | Callable[[str, list[dict[str, Any]], list[dict[str, Any]]], Any]") -> None:
+    def __init__(self,
+                 provider: "LlmProviderBackend | Callable[[str, list[dict[str, Any]], list[dict[str, Any]]], Any]") -> None:
         self._provider = provider
 
     def complete(self, model: str, messages_json: str, tools_json: str) -> str:
         messages = json.loads(messages_json) if messages_json else []
         tools = json.loads(tools_json) if tools_json else []
 
-        if isinstance(self._provider, LlmProviderBackend):
-            result = _resolve_callback_result(self._provider.complete(model, messages, tools))
-        else:
-            result = _resolve_callback_result(self._provider(model, messages, tools))
+        try:
+            if isinstance(self._provider, LlmProviderBackend):
+                result = _resolve_callback_result(self._provider.complete(model, messages, tools))
+            else:
+                result = _resolve_callback_result(self._provider(model, messages, tools))
+        except Exception as error:
+            return json.dumps(
+                {
+                    "content": f"LLM provider error: {error}",
+                    "tool_calls": [],
+                    "model": model,
+                    "finish_reason": "error",
+                }
+            )
 
         if isinstance(result, str):
             return result
@@ -288,12 +473,12 @@ class _PythonToolHandler(EnkiToolHandler):
             self._current_deps = None
 
     def execute(
-        self,
-        tool_name: str,
-        args_json: str,
-        agent_dir: str,
-        workspace_dir: str,
-        sessions_dir: str,
+            self,
+            tool_name: str,
+            args_json: str,
+            agent_dir: str,
+            workspace_dir: str,
+            sessions_dir: str,
     ) -> str:
         tool = self._tools[tool_name]
         parsed_args = json.loads(args_json) if args_json else {}
@@ -315,8 +500,8 @@ class _PythonToolHandler(EnkiToolHandler):
 
         for parameter in parameters:
             if parameter.kind not in (
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                inspect.Parameter.KEYWORD_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
             ):
                 raise TypeError(
                     f"Tool '{tool_name}' uses unsupported parameter kind: {parameter.kind}"
@@ -340,21 +525,21 @@ class _PythonMemoryHandler(EnkiMemoryHandler):
         self._memories = memories
 
     def record(
-        self,
-        memory_name: str,
-        session_id: str,
-        user_msg: str,
-        assistant_msg: str,
+            self,
+            memory_name: str,
+            session_id: str,
+            user_msg: str,
+            assistant_msg: str,
     ) -> None:
         memory = self._memories[memory_name]
         _resolve_callback_result(memory.record(session_id, user_msg, assistant_msg))
 
     def recall(
-        self,
-        memory_name: str,
-        session_id: str,
-        query: str,
-        max_entries: int,
+            self,
+            memory_name: str,
+            session_id: str,
+            query: str,
+            max_entries: int,
     ) -> list[_LowLevelMemoryEntry]:
         memory = self._memories[memory_name]
         entries = _resolve_callback_result(memory.recall(session_id, query, max_entries))
@@ -481,8 +666,8 @@ def _build_parameters_json(func: Callable[..., Any], uses_context: bool) -> str:
 
     for parameter in parameters:
         if parameter.kind not in (
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
         ):
             raise TypeError(
                 f"Tool '{func.__name__}' uses unsupported parameter kind: {parameter.kind}"
@@ -505,17 +690,17 @@ def _build_parameters_json(func: Callable[..., Any], uses_context: bool) -> str:
 
 class Agent(Generic[DepsT]):
     def __init__(
-        self,
-        model: str,
-        *,
-        deps_type: type[DepsT] | None = None,
-        instructions: str = "",
-        name: str = "Agent",
-        max_iterations: int = 20,
-        workspace_home: str | None = None,
-        tools: list[Tool] | None = None,
-        memories: list[MemoryModule] | None = None,
-        llm: LlmProviderBackend | Callable[[str, list[dict[str, Any]], list[dict[str, Any]]], Any] | None = None,
+            self,
+            model: str,
+            *,
+            deps_type: type[DepsT] | None = None,
+            instructions: str = "",
+            name: str = "Agent",
+            max_iterations: int = 20,
+            workspace_home: str | None = None,
+            tools: list[Tool] | None = None,
+            memories: list[MemoryModule] | None = None,
+            llm: LlmProviderBackend | Callable[[str, list[dict[str, Any]], list[dict[str, Any]]], Any] | None = None,
     ) -> None:
         self.model = model
         self.deps_type = deps_type
@@ -527,7 +712,8 @@ class Agent(Generic[DepsT]):
         self._memories: dict[str, MemoryModule] = {}
         self._handler = _PythonToolHandler(self._tools)
         self._memory_handler = _PythonMemoryHandler(self._memories)
-        self._llm_handler = _PythonLlmHandler(llm) if llm is not None else None
+        provider = llm if llm is not None else LiteLlmProvider()
+        self._llm_handler = _PythonLlmHandler(provider)
         self._backend: Any = None
         self._dirty = True
         if tools:
@@ -660,11 +846,11 @@ class Agent(Generic[DepsT]):
         return self._backend
 
     async def run(
-        self,
-        user_message: str,
-        *,
-        deps: DepsT | None = None,
-        session_id: str | None = None,
+            self,
+            user_message: str,
+            *,
+            deps: DepsT | None = None,
+            session_id: str | None = None,
     ) -> AgentRunResult:
         backend = self._ensure_backend()
         session_id = session_id or f"session-{uuid.uuid4()}"
@@ -677,11 +863,11 @@ class Agent(Generic[DepsT]):
         return AgentRunResult(output=output)
 
     def run_sync(
-        self,
-        user_message: str,
-        *,
-        deps: DepsT | None = None,
-        session_id: str | None = None,
+            self,
+            user_message: str,
+            *,
+            deps: DepsT | None = None,
+            session_id: str | None = None,
     ) -> AgentRunResult:
         try:
             asyncio.get_running_loop()
@@ -730,8 +916,8 @@ class MultiAgentRuntime:
                 )
 
         def discover_agents(
-            capability: str | None = None,
-            status: str | None = None,
+                capability: str | None = None,
+                status: str | None = None,
         ) -> list[dict[str, Any]]:
             cards = self.discover(capability=capability, status=status)
             return [card.__dict__ for card in cards if card.agent_id != member.agent_id]
@@ -784,10 +970,10 @@ class MultiAgentRuntime:
         ]
 
     def discover(
-        self,
-        *,
-        capability: str | None = None,
-        status: str | None = None,
+            self,
+            *,
+            capability: str | None = None,
+            status: str | None = None,
     ) -> list[AgentCard]:
         cards = self.registry()
         if capability is not None:
@@ -801,11 +987,11 @@ class MultiAgentRuntime:
         return cards
 
     async def process(
-        self,
-        agent_id: str,
-        user_message: str,
-        *,
-        session_id: str | None = None,
+            self,
+            agent_id: str,
+            user_message: str,
+            *,
+            session_id: str | None = None,
     ) -> AgentRunResult:
         member = self._members.get(agent_id)
         if member is None:
@@ -813,11 +999,11 @@ class MultiAgentRuntime:
         return await member.agent.run(user_message, session_id=session_id)
 
     def process_sync(
-        self,
-        agent_id: str,
-        user_message: str,
-        *,
-        session_id: str | None = None,
+            self,
+            agent_id: str,
+            user_message: str,
+            *,
+            session_id: str | None = None,
     ) -> AgentRunResult:
         member = self._members.get(agent_id)
         if member is None:

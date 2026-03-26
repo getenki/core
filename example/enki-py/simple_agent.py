@@ -1,8 +1,8 @@
-import os
+import uuid
 
 from enki_py import Agent
 
-print(os.environ["ANTHROPIC_API_KEY"])
+
 def main() -> None:
     agent = Agent(
         "anthropic::claude-sonnet-4-6",
@@ -12,7 +12,7 @@ def main() -> None:
 
     result = agent.run_sync(
         "Explain what this Enki Python example demonstrates.",
-        session_id="simple-agent-example",
+        session_id=f"simple-agent-anthropic-{uuid.uuid4()}",
     )
     print(result.output)
 

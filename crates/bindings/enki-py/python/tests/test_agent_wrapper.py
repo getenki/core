@@ -1,4 +1,5 @@
 import json
+import types
 
 import enki_py.agent as agent_module
 
@@ -63,8 +64,14 @@ class FakeEnkiAgent:
         return "No-op"
 
 
+class FakeLiteLlmProvider(agent_module.LlmProviderBackend):
+    def complete(self, model: str, messages, tools):
+        return {"content": f"default llm:{model}:{messages[-1]['content']}"}
+
+
 def test_wrapper_supports_pydantic_ai_style_usage(monkeypatch):
     monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
+    monkeypatch.setattr(agent_module, "LiteLlmProvider", FakeLiteLlmProvider)
 
     agent = agent_module.Agent(
         "gateway/gemini:gemini-3-flash-preview",
@@ -88,13 +95,15 @@ def test_wrapper_supports_pydantic_ai_style_usage(monkeypatch):
 
     dice_result = agent.run_sync("My guess is 4", deps="Anne")
 
-    assert dice_result.output == (
-        "Congratulations Anne, you guessed correctly! You're a winner!"
+    assert (
+        dice_result.output
+        == "default llm:gateway/gemini:gemini-3-flash-preview:My guess is 4"
     )
 
 
 def test_wrapper_builds_tool_schemas_and_passes_runtime_deps(monkeypatch):
     monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
+    monkeypatch.setattr(agent_module, "LiteLlmProvider", FakeLiteLlmProvider)
 
     agent = agent_module.Agent("test-model", deps_type=str)
 
@@ -109,7 +118,7 @@ def test_wrapper_builds_tool_schemas_and_passes_runtime_deps(monkeypatch):
         return ctx.deps
 
     result = agent.run_sync("My guess is 1", deps="Anne")
-    assert result.output.startswith("Sorry Anne")
+    assert result.output == "default llm:test-model:My guess is 1"
 
     tools = FakeEnkiAgent.last_kwargs["tools"]
     score_spec = next(tool for tool in tools if tool.name == "format_score")
@@ -144,6 +153,7 @@ def test_wrapper_builds_tool_schemas_and_passes_runtime_deps(monkeypatch):
 
 def test_wrapper_registers_concrete_tool_objects(monkeypatch):
     monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
+    monkeypatch.setattr(agent_module, "LiteLlmProvider", FakeLiteLlmProvider)
 
     agent = agent_module.Agent("test-model")
 
@@ -155,7 +165,7 @@ def test_wrapper_registers_concrete_tool_objects(monkeypatch):
     agent.register_tool(tool)
 
     result = agent.run_sync("My guess is 1")
-    assert result.output == "No-op"
+    assert result.output == "default llm:test-model:My guess is 1"
 
     tools = FakeEnkiAgent.last_kwargs["tools"]
     score_spec = next(tool for tool in tools if tool.name == "format_score")
@@ -186,3 +196,176 @@ def test_wrapper_supports_custom_llm_provider(monkeypatch):
     result = agent.run_sync("hello")
 
     assert result.output == "provider response"
+
+
+def test_wrapper_uses_litellm_provider_by_default(monkeypatch):
+    monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
+    monkeypatch.setattr(agent_module, "LiteLlmProvider", FakeLiteLlmProvider)
+
+    agent = agent_module.Agent("default-model")
+    result = agent.run_sync("hello")
+
+    assert result.output == "default llm:default-model:hello"
+
+
+def test_litellm_provider_normalizes_completion(monkeypatch):
+    calls = {}
+
+    class FakeResponse:
+        def model_dump(self):
+            return {
+                "model": "openai/gpt-4o-mini",
+                "choices": [
+                    {
+                        "message": {
+                            "content": "litellm response",
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "function": {
+                                        "name": "echo",
+                                        "arguments": "{\"value\":\"hello\"}",
+                                    },
+                                    "type": "function",
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+            }
+
+    fake_module = types.SimpleNamespace()
+
+    def fake_completion(**kwargs):
+        calls.update(kwargs)
+        return FakeResponse()
+
+    fake_module.completion = fake_completion
+    monkeypatch.setattr(agent_module.importlib, "import_module", lambda name: fake_module)
+    monkeypatch.delenv("OLLAMA_URL", raising=False)
+    monkeypatch.delenv("ENKI_LITELLM_TIMEOUT", raising=False)
+    monkeypatch.delenv("ENKI_OLLAMA_TOOLS", raising=False)
+
+    provider = agent_module.LiteLlmProvider(temperature=0.2)
+    result = provider.complete(
+        "ollama::qwen3.5:latest",
+        [{"role": "user", "content": "hello"}],
+        [{"name": "echo", "description": "Echo a value"}],
+    )
+
+    assert calls["model"] == "ollama/qwen3.5:latest"
+    assert calls["messages"] == [{"role": "user", "content": "hello"}]
+    assert "tools" not in calls
+    assert calls["api_base"] == "http://127.0.0.1:11434"
+    assert calls["timeout"] == 60.0
+    assert calls["temperature"] == 0.2
+    assert result == {
+        "content": "litellm response",
+        "tool_calls": [
+            json.dumps(
+                {
+                    "id": "call-1",
+                    "function": {
+                        "name": "echo",
+                        "arguments": "{\"value\":\"hello\"}",
+                    },
+                    "type": "function",
+                }
+            )
+        ],
+        "model": "openai/gpt-4o-mini",
+        "finish_reason": "tool_calls",
+    }
+
+
+def test_litellm_provider_can_send_ollama_tools_when_enabled(monkeypatch):
+    calls = {}
+
+    class FakeResponse:
+        def model_dump(self):
+            return {
+                "model": "ollama/qwen3.5:latest",
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            }
+
+    fake_module = types.SimpleNamespace()
+
+    def fake_completion(**kwargs):
+        calls.update(kwargs)
+        return FakeResponse()
+
+    fake_module.completion = fake_completion
+    monkeypatch.setattr(agent_module.importlib, "import_module", lambda name: fake_module)
+    monkeypatch.setenv("ENKI_OLLAMA_TOOLS", "true")
+
+    provider = agent_module.LiteLlmProvider()
+    provider.complete(
+        "ollama::qwen3.5:latest",
+        [{"role": "user", "content": "hello"}],
+        [{"name": "echo", "description": "Echo a value"}],
+    )
+
+    assert calls["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "echo",
+                "description": "Echo a value",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+
+def test_litellm_provider_normalizes_tool_messages_for_anthropic(monkeypatch):
+    calls = {}
+
+    class FakeResponse:
+        def model_dump(self):
+            return {
+                "model": "anthropic/claude-sonnet-4-6",
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            }
+
+    fake_module = types.SimpleNamespace()
+
+    def fake_completion(**kwargs):
+        calls.update(kwargs)
+        return FakeResponse()
+
+    fake_module.completion = fake_completion
+    monkeypatch.setattr(agent_module.importlib, "import_module", lambda name: fake_module)
+
+    provider = agent_module.LiteLlmProvider()
+    provider.complete(
+        "anthropic::claude-sonnet-4-6",
+        [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": ""},
+            {"role": "tool", "content": "42", "tool_call_id": "call-1"},
+        ],
+        [],
+    )
+
+    assert calls["messages"] == [
+        {"role": "user", "content": "hello"},
+        {"role": "user", "content": "Tool result (tool_call_id=call-1): 42"},
+    ]
+
+
+def test_litellm_provider_missing_dependency_returns_error_message(monkeypatch):
+    monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
+
+    def fail_import(name: str):
+        raise ModuleNotFoundError("No module named 'litellm'")
+
+    monkeypatch.setattr(agent_module.importlib, "import_module", fail_import)
+
+    agent = agent_module.Agent("ollama::qwen3.5:latest")
+    result = agent.run_sync("hello")
+
+    assert result.output == (
+        "LLM provider error: LiteLLM is not installed. Install it with `pip install litellm` "
+        "or pass a custom `llm=` provider."
+    )
