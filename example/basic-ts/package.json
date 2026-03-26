@@ -9,12 +9,15 @@
   "scripts": {
     "start": "tsx index.ts",
     "start:multi-agent-tools-memory": "tsx multi-agent-tools-memory.ts",
+    "start:excel-dashboard": "tsx excel-dashboard-multi-agent.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@getenki/ai": "file:../../crates/bindings/enki-js"
+    "@getenki/ai": "file:../../crates/bindings/enki-js",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2"
   }
