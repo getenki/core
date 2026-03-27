@@ -7,3 +7,4 @@ docs/enki-py/node_modules
 docs/enki-py/.docusaurus
 docs/enki-py/build
 *.DS_Store
+__pycache__
