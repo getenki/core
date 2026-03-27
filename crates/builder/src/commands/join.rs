@@ -7,10 +7,8 @@ use std::io::{self, BufRead, Write};
 
 pub async fn run(args: JoinArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
-    let manifest_dir = args
-        .manifest
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
+    let manifest_dir = args.manifest.parent().unwrap_or(std::path::Path::new("."));
+    project_runtime::validate_python_tools(&manifest, manifest_dir)?;
     let workspace_home = manifest_dir
         .join(&manifest.workspace.home)
         .to_string_lossy()
@@ -38,7 +36,11 @@ pub async fn run(args: JoinArgs) -> Result<(), String> {
     };
 
     let default_agent_id = args.agent.as_deref().unwrap_or(&manifest.agents[0].id);
-    if manifest.agents.iter().all(|agent| agent.id != default_agent_id) {
+    if manifest
+        .agents
+        .iter()
+        .all(|agent| agent.id != default_agent_id)
+    {
         return Err(format!(
             "Agent '{}' not found. Available: {}",
             default_agent_id,

@@ -18,3 +18,4 @@ enki join
 ## Configuration
 
 Edit `enki.toml` to add agents, change models, or update capabilities.
+Python projects can define reusable `[[tool]]` entries with `path` and `symbol`.

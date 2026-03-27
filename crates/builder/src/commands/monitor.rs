@@ -4,10 +4,7 @@ use crate::manifest::Manifest;
 pub async fn run(args: MonitorArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
 
-    println!(
-        "\x1b[1;36mAgent Monitor\x1b[0m - {}",
-        manifest.project.name
-    );
+    println!("\x1b[1;36mAgent Monitor\x1b[0m - {}", manifest.project.name);
     println!();
     println!(
         "  {:<20} {:<24} {:<12} {}",

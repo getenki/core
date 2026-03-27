@@ -12,6 +12,8 @@ const TS_INDEX: &str = include_str!("../../templates/ts/src/index.ts");
 const PY_ENKI_TOML: &str = include_str!("../../templates/py/enki.toml");
 const PY_PYPROJECT: &str = include_str!("../../templates/py/pyproject.toml");
 const PY_MAIN: &str = include_str!("../../templates/py/src/main.py");
+const PY_MAIN_WITH_TOOL: &str = include_str!("../../templates/py/src/main.with_tool.py");
+const PY_ASSISTANT_TOOL: &str = include_str!("../../templates/py/src/tools/assistant.py");
 
 const RS_ENKI_TOML: &str = include_str!("../../templates/rs/enki.toml");
 const RS_CARGO_TOML: &str = include_str!("../../templates/rs/Cargo.toml.tmpl");
@@ -37,10 +39,23 @@ enki join
 ## Configuration
 
 Edit `enki.toml` to add agents, change models, or update capabilities.
+Python projects can define reusable `[[tool]]` entries with `path` and `symbol`.
+"#;
+
+const PY_TOOL_BLOCK: &str = r#"
+[[tool]]
+id = "assistant-tools"
+kind = "python"
+path = "src/tools/assistant.py"
+symbol = "register_assistant_tools"
 "#;
 
 pub fn run(args: InitArgs) -> Result<(), String> {
     let project_dir = Path::new(&args.name);
+
+    if args.with_tool && !matches!(args.template, Template::Py) {
+        return Err("--with-tool is currently supported only with --template py.".to_string());
+    }
 
     if project_dir.exists() {
         return Err(format!(
@@ -60,9 +75,18 @@ pub fn run(args: InitArgs) -> Result<(), String> {
 
     // Write enki.toml + README
     let (enki_toml, files) = match args.template {
-        Template::Ts => (TS_ENKI_TOML, scaffold_ts(project_dir, &args.name)?),
-        Template::Py => (PY_ENKI_TOML, scaffold_py(project_dir, &args.name)?),
-        Template::Rs => (RS_ENKI_TOML, scaffold_rs(project_dir, &args.name)?),
+        Template::Ts => (
+            TS_ENKI_TOML.to_string(),
+            scaffold_ts(project_dir, &args.name)?,
+        ),
+        Template::Py => (
+            render_py_enki_toml(args.with_tool),
+            scaffold_py(project_dir, &args.name, args.with_tool)?,
+        ),
+        Template::Rs => (
+            RS_ENKI_TOML.to_string(),
+            scaffold_rs(project_dir, &args.name)?,
+        ),
     };
 
     let enki_toml = enki_toml.replace("{{PROJECT_NAME}}", &args.name);
@@ -102,11 +126,25 @@ fn scaffold_ts(dir: &Path, name: &str) -> Result<Vec<String>, String> {
     ])
 }
 
-fn scaffold_py(dir: &Path, name: &str) -> Result<Vec<String>, String> {
+fn scaffold_py(dir: &Path, name: &str, with_tool: bool) -> Result<Vec<String>, String> {
     let pyproject = PY_PYPROJECT.replace("{{PROJECT_NAME}}", name);
     write_file(dir.join("pyproject.toml"), &pyproject)?;
-    write_file(dir.join("src/main.py"), PY_MAIN)?;
-    Ok(vec!["pyproject.toml".into(), "src/main.py".into()])
+    write_file(
+        dir.join("src/main.py"),
+        if with_tool {
+            PY_MAIN_WITH_TOOL
+        } else {
+            PY_MAIN
+        },
+    )?;
+
+    let mut files = vec!["pyproject.toml".into(), "src/main.py".into()];
+    if with_tool {
+        write_file(dir.join("src/tools/assistant.py"), PY_ASSISTANT_TOOL)?;
+        files.push("src/tools/assistant.py".into());
+    }
+
+    Ok(files)
 }
 
 fn scaffold_rs(dir: &Path, name: &str) -> Result<Vec<String>, String> {
@@ -121,4 +159,35 @@ fn write_file(path: std::path::PathBuf, content: &str) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
     fs::write(&path, content).map_err(|e| format!("Failed to write {}: {e}", path.display()))
+}
+
+fn render_py_enki_toml(with_tool: bool) -> String {
+    let mut rendered = PY_ENKI_TOML.to_string();
+    if with_tool {
+        rendered.push_str(PY_TOOL_BLOCK);
+        rendered.push('\n');
+        rendered.push_str(r#"tools = ["assistant-tools"]"#);
+        rendered.push('\n');
+    }
+    rendered
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_py_enki_toml;
+
+    #[test]
+    fn render_py_enki_toml_omits_tool_block_by_default() {
+        let rendered = render_py_enki_toml(false);
+        assert!(!rendered.contains("[[tool]]"));
+        assert!(!rendered.contains("tools = [\"assistant-tools\"]"));
+    }
+
+    #[test]
+    fn render_py_enki_toml_adds_tool_block_when_requested() {
+        let rendered = render_py_enki_toml(true);
+        assert!(rendered.contains("[[tool]]"));
+        assert!(rendered.contains("path = \"src/tools/assistant.py\""));
+        assert!(rendered.contains("tools = [\"assistant-tools\"]"));
+    }
 }

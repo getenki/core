@@ -6,10 +6,8 @@ use core_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
 
 pub async fn run(args: TestArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
-    let manifest_dir = args
-        .manifest
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
+    let manifest_dir = args.manifest.parent().unwrap_or(std::path::Path::new("."));
+    project_runtime::validate_python_tools(&manifest, manifest_dir)?;
     let workspace_home = manifest_dir
         .join(&manifest.workspace.home)
         .to_string_lossy()

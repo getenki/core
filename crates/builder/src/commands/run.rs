@@ -6,10 +6,8 @@ use core_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
 
 pub async fn run(args: RunArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
-    let project_dir = args
-        .manifest
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
+    let project_dir = args.manifest.parent().unwrap_or(std::path::Path::new("."));
+    project_runtime::validate_python_tools(&manifest, project_dir)?;
     let workspace_home = resolve_workspace_home(&args, &manifest);
 
     println!(
@@ -74,7 +72,9 @@ pub async fn run(args: RunArgs) -> Result<(), String> {
         );
 
         let runtime = builder.build().await?;
-        let response = runtime.process(agent_id, "cli-session", &args.message).await?;
+        let response = runtime
+            .process(agent_id, "cli-session", &args.message)
+            .await?;
 
         println!("\x1b[1;33m{}:\x1b[0m {}", agent_cfg.name, response);
     } else {
@@ -141,10 +141,7 @@ pub async fn run(args: RunArgs) -> Result<(), String> {
 }
 
 fn resolve_workspace_home(args: &RunArgs, manifest: &Manifest) -> String {
-    let manifest_dir = args
-        .manifest
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
+    let manifest_dir = args.manifest.parent().unwrap_or(std::path::Path::new("."));
     manifest_dir
         .join(&manifest.workspace.home)
         .to_string_lossy()

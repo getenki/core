@@ -225,19 +225,19 @@ impl MultiAgentRuntimeBuilder {
                 Box::new(DelegateTaskTool) as Box<dyn Tool>,
             );
 
-            let tool_executor =
-                spec.tool_executor.unwrap_or_else(|| Box::new(RegistryToolExecutor));
+            let tool_executor = spec
+                .tool_executor
+                .unwrap_or_else(|| Box::new(RegistryToolExecutor));
 
-            let agent =
-                Agent::with_definition_tool_registry_executor_llm_and_workspace(
-                    spec.definition,
-                    tool_registry,
-                    tool_executor,
-                    spec.llm,
-                    spec.memory,
-                    self.workspace_home.clone(),
-                )
-                .await?;
+            let agent = Agent::with_definition_tool_registry_executor_llm_and_workspace(
+                spec.definition,
+                tool_registry,
+                tool_executor,
+                spec.llm,
+                spec.memory,
+                self.workspace_home.clone(),
+            )
+            .await?;
 
             agents.insert(spec.agent_id, Arc::new(agent));
         }
@@ -406,7 +406,10 @@ mod tests {
             .await
             .unwrap();
 
-        let response = runtime.process("helper", "s1", "do something").await.unwrap();
+        let response = runtime
+            .process("helper", "s1", "do something")
+            .await
+            .unwrap();
         assert_eq!(response, "I helped!");
     }
 

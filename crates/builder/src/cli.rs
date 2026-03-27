@@ -17,6 +17,8 @@ pub struct Cli {
 pub enum Command {
     /// Create a new Enki project
     Init(InitArgs),
+    /// Create and register project-local tools
+    Tool(ToolArgs),
     /// Install project dependencies
     Build(BuildArgs),
     /// Run agents defined in enki.toml
@@ -55,6 +57,41 @@ pub struct InitArgs {
     /// Language template to scaffold
     #[arg(long, default_value = "ts")]
     pub template: Template,
+
+    /// Add a sample tool entry to enki.toml and scaffold a Python tool file
+    #[arg(long, default_value_t = false)]
+    pub with_tool: bool,
+}
+
+#[derive(Parser)]
+pub struct ToolArgs {
+    #[command(subcommand)]
+    pub command: ToolCommand,
+}
+
+#[derive(Subcommand)]
+pub enum ToolCommand {
+    /// Create a Python tool file and register it in enki.toml
+    New(NewToolArgs),
+}
+
+#[derive(Parser)]
+pub struct NewToolArgs {
+    /// Path to enki.toml manifest
+    #[arg(long, default_value = "./enki.toml")]
+    pub manifest: PathBuf,
+
+    /// Tool name used to derive id, file path, and Python symbol
+    #[arg(long)]
+    pub name: String,
+
+    /// Override generated tool id
+    #[arg(long)]
+    pub id: Option<String>,
+
+    /// Attach the tool to a specific agent id
+    #[arg(long)]
+    pub agent: Option<String>,
 }
 
 #[derive(Parser)]

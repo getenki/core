@@ -9,6 +9,9 @@ pub struct Manifest {
     #[serde(default)]
     pub workspace: WorkspaceConfig,
 
+    #[serde(rename = "tool", default)]
+    pub tools: Vec<ToolConfig>,
+
     #[serde(rename = "agent", default)]
     pub agents: Vec<AgentConfig>,
 }
@@ -43,6 +46,20 @@ fn default_home() -> String {
     "./.enki".to_string()
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct ToolConfig {
+    pub id: String,
+    pub kind: String,
+    pub path: String,
+    pub symbol: String,
+}
+
+impl ToolConfig {
+    pub fn is_python(&self) -> bool {
+        self.kind.eq_ignore_ascii_case("python")
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AgentConfig {
     pub id: String,
@@ -57,6 +74,9 @@ pub struct AgentConfig {
 
     #[serde(default)]
     pub capabilities: Vec<String>,
+
+    #[serde(default)]
+    pub tools: Vec<String>,
 }
 
 fn default_max_iterations() -> usize {
@@ -68,8 +88,8 @@ impl Manifest {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
 
-        let manifest: Manifest =
-            toml::from_str(&content).map_err(|e| format!("Failed to parse {}: {e}", path.display()))?;
+        let manifest: Manifest = toml::from_str(&content)
+            .map_err(|e| format!("Failed to parse {}: {e}", path.display()))?;
 
         if manifest.agents.is_empty() {
             return Err(format!(
@@ -78,7 +98,27 @@ impl Manifest {
             ));
         }
 
+        for agent in &manifest.agents {
+            for tool_id in &agent.tools {
+                if manifest.tools.iter().all(|tool| tool.id != *tool_id) {
+                    return Err(format!(
+                        "Agent '{}' references unknown tool '{}'.",
+                        agent.id, tool_id
+                    ));
+                }
+            }
+        }
+
         Ok(manifest)
+    }
+
+    pub fn resolve_tools(&self, agent: &AgentConfig) -> Vec<ToolConfig> {
+        agent
+            .tools
+            .iter()
+            .filter_map(|tool_id| self.tools.iter().find(|tool| tool.id == *tool_id))
+            .cloned()
+            .collect()
     }
 }
 
@@ -103,6 +143,7 @@ model = "ollama::qwen3.5"
         assert_eq!(manifest.agents.len(), 1);
         assert_eq!(manifest.agents[0].id, "assistant");
         assert_eq!(manifest.agents[0].max_iterations, 20);
+        assert!(manifest.agents[0].tools.is_empty());
         assert_eq!(manifest.workspace.home, "./.enki");
     }
 
@@ -116,6 +157,12 @@ version = "0.2.0"
 [workspace]
 home = "./workspace"
 
+[[tool]]
+id = "coder-tools"
+kind = "python"
+path = "src/tools/coder.py"
+symbol = "register_coder_tools"
+
 [[agent]]
 id = "coder"
 name = "Coder"
@@ -123,6 +170,7 @@ model = "openai::gpt-4o"
 system_prompt = "You write code."
 max_iterations = 10
 capabilities = ["code-gen", "refactoring"]
+tools = ["coder-tools"]
 
 [[agent]]
 id = "researcher"
@@ -136,9 +184,43 @@ capabilities = ["research"]
         assert_eq!(manifest.project.name, "my-agents");
         assert_eq!(manifest.project.version, "0.2.0");
         assert_eq!(manifest.workspace.home, "./workspace");
+        assert_eq!(manifest.tools.len(), 1);
         assert_eq!(manifest.agents.len(), 2);
-        assert_eq!(manifest.agents[0].capabilities, vec!["code-gen", "refactoring"]);
+        assert_eq!(
+            manifest.agents[0].capabilities,
+            vec!["code-gen", "refactoring"]
+        );
+        assert_eq!(manifest.agents[0].tools, vec!["coder-tools"]);
+        assert_eq!(
+            manifest.resolve_tools(&manifest.agents[0]),
+            vec![ToolConfig {
+                id: "coder-tools".into(),
+                kind: "python".into(),
+                path: "src/tools/coder.py".into(),
+                symbol: "register_coder_tools".into(),
+            }]
+        );
         assert_eq!(manifest.agents[1].max_iterations, 5);
+    }
+
+    #[test]
+    fn reject_unknown_tool_reference() {
+        let toml_str = r#"
+[project]
+name = "bad-tool"
+
+[[agent]]
+id = "assistant"
+name = "Assistant"
+model = "ollama::qwen3.5"
+tools = ["missing"]
+"#;
+        let tmp = std::env::temp_dir().join("enki-test-missing-tool.toml");
+        std::fs::write(&tmp, toml_str).unwrap();
+        let result = Manifest::load(&tmp);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown tool"));
+        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]

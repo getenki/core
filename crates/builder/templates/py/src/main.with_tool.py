@@ -9,17 +9,29 @@ import os
 import sys
 
 from enki_py import Agent
+from tools.assistant import register_assistant_tools
 
 
 def build_assistant(model: str) -> Agent:
-    return Agent(
+    agent = Agent(
         model,
         name="Personal Assistant",
         instructions=(
             "You are a helpful personal assistant. "
-            "Answer questions clearly and concisely."
+            "Answer questions clearly and concisely. "
+            "Use the configured tools when they help."
         ),
     )
+    register_assistant_tools(
+        agent,
+        {
+            "id": "assistant",
+            "name": "Personal Assistant",
+            "model": model,
+            "capabilities": ["general", "writing", "analysis"],
+        },
+    )
+    return agent
 
 
 def main() -> None:

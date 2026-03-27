@@ -1,9 +1,9 @@
 mod workspace;
 
 use crate::agent::workspace::AgentWorkspace;
-use crate::llm::{ChatMessage, LlmConfig, LlmProvider, MessageRole, ToolDefinition};
 #[cfg(all(not(target_arch = "wasm32"), feature = "universal-llm-provider"))]
 use crate::llm::UniversalLLMClient;
+use crate::llm::{ChatMessage, LlmConfig, LlmProvider, MessageRole, ToolDefinition};
 use crate::memory::MemoryManager;
 use crate::message::IndexedValue;
 use crate::message::{Message, next_request_id};

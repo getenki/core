@@ -34,10 +34,10 @@ pub use types::{
 
 #[cfg(target_arch = "wasm32")]
 use async_trait::async_trait;
-#[cfg(target_arch = "wasm32")]
-use futures::stream;
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "universal-llm-provider")))]
 use async_trait::async_trait;
+#[cfg(target_arch = "wasm32")]
+use futures::stream;
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "universal-llm-provider")))]
 use futures::stream;
 

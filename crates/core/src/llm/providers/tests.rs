@@ -40,7 +40,10 @@ fn test_universal_config_openai_with_simple_prompt() {
     assert_eq!(result.content, "Hello");
     assert_eq!(result.model, "openai::gpt-4o");
     assert_eq!(result.finish_reason.as_deref(), Some("stop"));
-    assert_eq!(result.usage.as_ref().and_then(|usage| usage.total_tokens), Some(13));
+    assert_eq!(
+        result.usage.as_ref().and_then(|usage| usage.total_tokens),
+        Some(13)
+    );
 }
 
 #[tokio::test]

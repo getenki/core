@@ -1,5 +1,5 @@
-use crate::registry::DiscoverQuery;
 use crate::registry::AgentStatus;
+use crate::registry::DiscoverQuery;
 use crate::tooling::types::{Tool, ToolContext, parse_tool_args};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -63,7 +63,9 @@ impl Tool for DiscoverAgentsTool {
             if let Some(status) = AgentStatus::from_str_loose(&status_str) {
                 query = query.with_status(status);
             } else {
-                return format!("Error: unknown status '{status_str}'. Use 'online', 'busy', or 'offline'.");
+                return format!(
+                    "Error: unknown status '{status_str}'. Use 'online', 'busy', or 'offline'."
+                );
             }
         }
 
@@ -215,9 +217,7 @@ mod tests {
     async fn discover_returns_peers_excluding_self() {
         let delegation = populated_delegation_ctx().await;
         let tool = DiscoverAgentsTool;
-        let result = tool
-            .execute(&json!({}), &test_ctx(Some(delegation)))
-            .await;
+        let result = tool.execute(&json!({}), &test_ctx(Some(delegation))).await;
         assert!(result.contains("peer-a"));
         assert!(result.contains("peer-b"));
         assert!(!result.contains("self-agent"));
@@ -242,10 +242,7 @@ mod tests {
         let delegation = populated_delegation_ctx().await;
         let tool = DiscoverAgentsTool;
         let result = tool
-            .execute(
-                &json!({"status": "offline"}),
-                &test_ctx(Some(delegation)),
-            )
+            .execute(&json!({"status": "offline"}), &test_ctx(Some(delegation)))
             .await;
         assert!(result.contains("peer-b"));
         assert!(!result.contains("peer-a"));
@@ -255,10 +252,7 @@ mod tests {
     async fn delegate_without_delegation_returns_error() {
         let tool = DelegateTaskTool;
         let result = tool
-            .execute(
-                &json!({"agent_id": "x", "task": "y"}),
-                &test_ctx(None),
-            )
+            .execute(&json!({"agent_id": "x", "task": "y"}), &test_ctx(None))
             .await;
         assert!(result.contains("not part of a multi-agent runtime"));
     }

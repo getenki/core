@@ -4,7 +4,7 @@ mod manifest;
 mod project_runtime;
 
 use clap::Parser;
-use cli::{Cli, Command};
+use cli::{Cli, Command, ToolCommand};
 
 #[tokio::main]
 async fn main() {
@@ -21,6 +21,9 @@ async fn main() {
 
     let result = match cli.command {
         Command::Init(args) => commands::init::run(args),
+        Command::Tool(args) => match args.command {
+            ToolCommand::New(args) => commands::tool::run_new(args),
+        },
         Command::Build(args) => commands::build::run(args).await,
         Command::Run(args) => commands::run::run(args).await,
         Command::Test(args) => commands::test::run(args).await,

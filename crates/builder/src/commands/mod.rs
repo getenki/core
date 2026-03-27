@@ -4,3 +4,4 @@ pub mod join;
 pub mod monitor;
 pub mod run;
 pub mod test;
+pub mod tool;

@@ -7,11 +7,7 @@ use async_trait::async_trait;
 /// selection, or even LLM-driven routing.
 #[async_trait(?Send)]
 pub trait PeerSelector {
-    async fn select(
-        &self,
-        candidates: &[AgentCard],
-        task_description: &str,
-    ) -> Option<String>;
+    async fn select(&self, candidates: &[AgentCard], task_description: &str) -> Option<String>;
 }
 
 /// Selects the first online agent whose capabilities match (or the first
@@ -20,11 +16,7 @@ pub struct FirstMatchSelector;
 
 #[async_trait(?Send)]
 impl PeerSelector for FirstMatchSelector {
-    async fn select(
-        &self,
-        candidates: &[AgentCard],
-        _task_description: &str,
-    ) -> Option<String> {
+    async fn select(&self, candidates: &[AgentCard], _task_description: &str) -> Option<String> {
         candidates
             .iter()
             .find(|card| card.status == AgentStatus::Online)

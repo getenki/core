@@ -3,6 +3,8 @@ use crate::manifest::Manifest;
 
 pub async fn run(args: BuildArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
+    let project_dir = args.manifest.parent().unwrap_or(std::path::Path::new("."));
+    crate::project_runtime::validate_python_tools(&manifest, project_dir)?;
 
     println!(
         "\x1b[1;36m⚡ Building project\x1b[0m '{}'",
@@ -21,11 +23,6 @@ pub async fn run(args: BuildArgs) -> Result<(), String> {
     println!();
 
     // Check for language-specific project files and run installs
-    let project_dir = args
-        .manifest
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
-
     if project_dir.join("package.json").exists() {
         println!("  \x1b[2mDetected Node project, running npm install...\x1b[0m");
         let status = tokio::process::Command::new("npm")

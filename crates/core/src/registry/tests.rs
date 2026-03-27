@@ -51,14 +51,10 @@ async fn register_and_discover_by_capability() {
 async fn discover_by_status() {
     let registry = AgentRegistry::new();
     registry
-        .register(
-            AgentCard::new("agent-a", "A", "...", vec![]).with_status(AgentStatus::Online),
-        )
+        .register(AgentCard::new("agent-a", "A", "...", vec![]).with_status(AgentStatus::Online))
         .await;
     registry
-        .register(
-            AgentCard::new("agent-b", "B", "...", vec![]).with_status(AgentStatus::Offline),
-        )
+        .register(AgentCard::new("agent-b", "B", "...", vec![]).with_status(AgentStatus::Offline))
         .await;
 
     let query = DiscoverQuery::new().with_status(AgentStatus::Offline);
@@ -129,11 +125,7 @@ async fn update_status() {
 #[tokio::test]
 async fn update_status_returns_false_for_unknown() {
     let registry = AgentRegistry::new();
-    assert!(
-        !registry
-            .update_status("ghost", AgentStatus::Offline)
-            .await
-    );
+    assert!(!registry.update_status("ghost", AgentStatus::Offline).await);
 }
 
 #[tokio::test]
@@ -187,9 +179,8 @@ async fn first_match_selector_picks_first_online() {
 #[tokio::test]
 async fn first_match_selector_returns_none_when_all_offline() {
     let selector = FirstMatchSelector;
-    let candidates = vec![
-        AgentCard::new("a", "A", "...", vec![]).with_status(AgentStatus::Offline),
-    ];
+    let candidates =
+        vec![AgentCard::new("a", "A", "...", vec![]).with_status(AgentStatus::Offline)];
 
     let selected = selector.select(&candidates, "some task").await;
     assert!(selected.is_none());
