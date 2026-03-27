@@ -2,9 +2,14 @@ name: CI-CLI
 
 on:
   push:
+    branches:
+      - main
+      - master
+      - devops-release
     tags:
-      - "v*"
-      - "rs-v*"
+      - 'v*'
+      - 'py-v*'
+      - 'py/**'
 
 permissions:
   contents: write

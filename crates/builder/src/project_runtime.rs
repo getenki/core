@@ -5,119 +5,6 @@ use tokio::process::Command;
 
 const CAPABILITY_SEPARATOR: char = '\u{1f}';
 const TOOL_SEPARATOR: char = '\u{1e}';
-const PYTHON_MANIFEST_RUNNER: &str = r#"
-import importlib.util
-import inspect
-import sys
-from pathlib import Path
-
-from enki_py import Agent, MultiAgentMember, MultiAgentRuntime
-
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
-
-def load_python_module(project_dir: str, relative_path: str):
-    entry = Path(project_dir) / relative_path
-    if not entry.exists():
-        raise RuntimeError(f"Configured Python tool file was not found: {entry}")
-
-    module_name = "enki_tool_" + str(abs(hash(str(entry))))
-    spec = importlib.util.spec_from_file_location(module_name, entry)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Failed to load Python tool module: {entry}")
-
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def invoke_python_tool(module, symbol: str, agent: Agent, agent_config: dict) -> None:
-    hook = getattr(module, symbol, None)
-    if hook is None:
-        raise RuntimeError(f"Python tool symbol '{symbol}' was not found in configured module")
-
-    parameters = list(inspect.signature(hook).parameters.values())
-    if not parameters:
-        raise RuntimeError(
-            f"Python tool symbol '{symbol}' must accept `agent` or `(agent, config)`"
-        )
-
-    if len(parameters) == 1:
-        hook(agent)
-    else:
-        hook(agent, agent_config)
-
-
-def main() -> None:
-    project_dir = sys.argv[1]
-    workspace_home = sys.argv[2]
-    agent_id = sys.argv[3]
-    session_id = sys.argv[4]
-    message = sys.argv[5]
-    agent_count = int(sys.argv[6])
-
-    members = []
-    index = 7
-    capability_separator = chr(31)
-    tool_separator = chr(30)
-    module_cache = {}
-
-    for _ in range(agent_count):
-        member_id = sys.argv[index]
-        name = sys.argv[index + 1]
-        model = sys.argv[index + 2]
-        instructions = sys.argv[index + 3]
-        max_iterations = int(sys.argv[index + 4])
-        capabilities = [value for value in sys.argv[index + 5].split(capability_separator) if value]
-        serialized_tools = [value for value in sys.argv[index + 6].split(capability_separator) if value]
-        index += 7
-
-        agent = Agent(
-            model,
-            name=name,
-            instructions=instructions,
-            max_iterations=max_iterations,
-            workspace_home=workspace_home,
-        )
-        agent_config = {
-            "id": member_id,
-            "name": name,
-            "model": model,
-            "system_prompt": instructions,
-            "max_iterations": max_iterations,
-            "capabilities": capabilities,
-            "tools": serialized_tools,
-        }
-        for serialized_tool in serialized_tools:
-            kind, relative_path, symbol = serialized_tool.split(tool_separator)
-            if kind.lower() != "python":
-                raise RuntimeError(f"Unsupported tool kind '{kind}' for Python runtime")
-            module = module_cache.get(relative_path)
-            if module is None:
-                module = load_python_module(project_dir, relative_path)
-                module_cache[relative_path] = module
-            invoke_python_tool(module, symbol, agent, agent_config)
-        members.append(
-            MultiAgentMember(
-                agent_id=member_id,
-                agent=agent,
-                capabilities=capabilities,
-                description=instructions,
-            )
-        )
-
-    runtime = MultiAgentRuntime(members)
-    result = runtime.process_sync(agent_id, message, session_id=session_id)
-    print(result.output)
-
-
-if __name__ == "__main__":
-    main()
-"#;
-
 pub fn is_python_project(project_dir: &Path) -> bool {
     project_dir.join("pyproject.toml").exists()
 }
@@ -233,8 +120,8 @@ fn python_runner_args(
     message: &str,
 ) -> Vec<String> {
     let mut args = vec![
-        "-c".to_string(),
-        PYTHON_MANIFEST_RUNNER.to_string(),
+        "-m".to_string(),
+        "enki_py.builder".to_string(),
         project_dir.to_string_lossy().to_string(),
         workspace_home.to_string(),
         agent_id.to_string(),
@@ -376,7 +263,7 @@ name = "demo"
 id = "assistant-tools"
 kind = "python"
 path = "src/tools/assistant.py"
-symbol = "register_assistant_tools"
+symbol = "project_runtime_info"
 
 [[agent]]
 id = "assistant"
@@ -412,7 +299,7 @@ name = "demo"
 id = "assistant-tools"
 kind = "python"
 path = "src/tools/assistant.py"
-symbol = "register_assistant_tools"
+symbol = "project_runtime_info"
 
 [[agent]]
 id = "assistant"
@@ -435,7 +322,7 @@ tools = ["assistant-tools"]
         assert_eq!(args[2], "demo");
         assert_eq!(
             args.last().unwrap(),
-            "python\u{1e}src/tools/assistant.py\u{1e}register_assistant_tools"
+            "python\u{1e}src/tools/assistant.py\u{1e}project_runtime_info"
         );
     }
 }

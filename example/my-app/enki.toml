@@ -8,7 +8,7 @@ id = "assistant"
 max_iterations = 20
 model = "ollama::qwen3.5"
 name = "Personal Assistant"
-system_prompt = "You are a helpful personal assistant. You help users with tasks, answer questions, and provide guidance."
+system_prompt = "You are a helpful personal assistant. Use Tools before answer"
 tools = ["weather-tools"]
 
 [project]
@@ -19,7 +19,7 @@ version = "0.1.0"
 id = "weather-tools"
 kind = "python"
 path = "src/tools/weather.py"
-symbol = "register_weather_tools"
+symbol = "weather_info"
 
 [workspace]
 home = "./.enki"

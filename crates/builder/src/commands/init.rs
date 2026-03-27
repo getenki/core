@@ -10,9 +10,8 @@ const TS_TSCONFIG: &str = include_str!("../../templates/ts/tsconfig.json");
 const TS_INDEX: &str = include_str!("../../templates/ts/src/index.ts");
 
 const PY_ENKI_TOML: &str = include_str!("../../templates/py/enki.toml");
+const PY_GITIGNORE: &str = include_str!("../../templates/py/.gitignore");
 const PY_PYPROJECT: &str = include_str!("../../templates/py/pyproject.toml");
-const PY_MAIN: &str = include_str!("../../templates/py/src/main.py");
-const PY_MAIN_WITH_TOOL: &str = include_str!("../../templates/py/src/main.with_tool.py");
 const PY_ASSISTANT_TOOL: &str = include_str!("../../templates/py/src/tools/assistant.py");
 
 const RS_ENKI_TOML: &str = include_str!("../../templates/rs/enki.toml");
@@ -47,7 +46,7 @@ const PY_TOOL_BLOCK: &str = r#"
 id = "assistant-tools"
 kind = "python"
 path = "src/tools/assistant.py"
-symbol = "register_assistant_tools"
+symbol = "project_runtime_info"
 "#;
 
 pub fn run(args: InitArgs) -> Result<(), String> {
@@ -127,20 +126,20 @@ fn scaffold_ts(dir: &Path, name: &str) -> Result<Vec<String>, String> {
 }
 
 fn scaffold_py(dir: &Path, name: &str, with_tool: bool) -> Result<Vec<String>, String> {
+    write_file(dir.join(".gitignore"), PY_GITIGNORE)?;
     let pyproject = PY_PYPROJECT.replace("{{PROJECT_NAME}}", name);
     write_file(dir.join("pyproject.toml"), &pyproject)?;
-    write_file(
-        dir.join("src/main.py"),
-        if with_tool {
-            PY_MAIN_WITH_TOOL
-        } else {
-            PY_MAIN
-        },
-    )?;
+    write_file(dir.join("src/__init__.py"), "")?;
 
-    let mut files = vec!["pyproject.toml".into(), "src/main.py".into()];
+    let mut files = vec![
+        ".gitignore".into(),
+        "pyproject.toml".into(),
+        "src/__init__.py".into(),
+    ];
     if with_tool {
+        write_file(dir.join("src/tools/__init__.py"), "")?;
         write_file(dir.join("src/tools/assistant.py"), PY_ASSISTANT_TOOL)?;
+        files.push("src/tools/__init__.py".into());
         files.push("src/tools/assistant.py".into());
     }
 

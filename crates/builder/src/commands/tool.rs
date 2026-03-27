@@ -24,7 +24,7 @@ pub fn run_new(args: NewToolArgs) -> Result<(), String> {
     let tool_path = PathBuf::from("src")
         .join("tools")
         .join(format!("{module_name}.py"));
-    let symbol = format!("register_{}_tools", module_name);
+    let symbol = format!("{}_info", module_name);
 
     if manifest.tools.iter().any(|tool| tool.id == tool_id) {
         return Err(format!(
@@ -103,9 +103,38 @@ fn write_tool_file(path: &Path, tool_name: &str, symbol: &str) -> Result<(), Str
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
+    ensure_python_package(path)?;
 
     let body = render_python_tool(tool_name, symbol);
     fs::write(path, body).map_err(|e| format!("Failed to write {}: {e}", path.display()))
+}
+
+fn ensure_python_package(path: &Path) -> Result<(), String> {
+    let src_dir = path
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().and_then(|name| name.to_str()) == Some("src"))
+        .ok_or_else(|| format!("Tool path '{}' must be inside src/.", path.display()))?;
+
+    write_init_file(&src_dir.join("__init__.py"))?;
+
+    let mut current = path.parent();
+    while let Some(dir) = current {
+        if dir == src_dir {
+            break;
+        }
+        write_init_file(&dir.join("__init__.py"))?;
+        current = dir.parent();
+    }
+
+    Ok(())
+}
+
+fn write_init_file(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        return Ok(());
+    }
+
+    fs::write(path, "").map_err(|e| format!("Failed to write {}: {e}", path.display()))
 }
 
 fn update_manifest(
@@ -193,28 +222,20 @@ fn render_python_tool(tool_name: &str, symbol: &str) -> String {
         r#"import json
 from typing import Any
 
-from enki_py import Agent
 
-
-def {symbol}(agent: Agent, config: dict[str, Any] | None = None) -> None:
-    """Register tools for {tool_name}."""
-    tool_config = config or {{}}
-
-    @agent.tool_plain
-    def {tool_func}() -> str:
-        """Return runtime metadata for this tool."""
-        return json.dumps(
-            {{
-                "tool": "{tool_name}",
-                "agent_id": tool_config.get("id"),
-                "agent_name": tool_config.get("name"),
-                "model": tool_config.get("model"),
-            }}
-        )
+def {symbol}(tool_config: dict[str, Any]) -> str:
+    """Return runtime metadata for the {tool_name} tool."""
+    return json.dumps(
+        {{
+            "tool": "{tool_name}",
+            "agent_id": tool_config.get("id"),
+            "agent_name": tool_config.get("name"),
+            "model": tool_config.get("model"),
+        }}
+    )
 "#,
         symbol = symbol,
-        tool_name = tool_name,
-        tool_func = format!("{}_info", to_snake_case(tool_name))
+        tool_name = tool_name
     )
 }
 
@@ -287,7 +308,7 @@ model = "ollama::qwen3.5"
             &manifest_path,
             "weather-tools",
             Path::new("src/tools/weather.py"),
-            "register_weather_tools",
+            "weather_info",
             Some("assistant"),
         )
         .unwrap();
@@ -297,6 +318,21 @@ model = "ollama::qwen3.5"
         assert!(updated.contains("id = \"weather-tools\""));
         assert!(updated.contains("path = \"src/tools/weather.py\""));
         assert!(updated.contains("tools = [\"weather-tools\"]"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn creates_init_files_for_tool_packages() {
+        let dir = std::env::temp_dir().join("enki-tool-package-test");
+        let _ = fs::remove_dir_all(&dir);
+        let tool_path = dir.join("src").join("tools").join("weather.py");
+        fs::create_dir_all(tool_path.parent().unwrap()).unwrap();
+
+        ensure_python_package(&tool_path).unwrap();
+
+        assert!(dir.join("src/__init__.py").exists());
+        assert!(dir.join("src/tools/__init__.py").exists());
 
         let _ = fs::remove_dir_all(&dir);
     }
