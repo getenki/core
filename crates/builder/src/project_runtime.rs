@@ -111,6 +111,63 @@ pub async fn run_python_agent(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+pub async fn run_script_agent(
+    project_dir: &Path,
+    script_path: &str,
+    session_id: &str,
+    message: &str,
+) -> Result<String, String> {
+    let mut last_not_found: Option<io::Error> = None;
+    let mut output = None;
+
+    let args = vec![
+        script_path.to_string(),
+        session_id.to_string(),
+        message.to_string(),
+    ];
+
+    for candidate in python_candidates(project_dir) {
+        let mut candidate_args = candidate.prefix_args.clone();
+        candidate_args.extend(args.iter().cloned());
+
+        match spawn_python(project_dir, &candidate.program, &candidate_args).await {
+            Ok(result) => {
+                output = Some(result);
+                break;
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                last_not_found = Some(err);
+            }
+            Err(err) => return Err(format!("Failed to start Python runtime: {err}")),
+        }
+    }
+
+    let output = match output {
+        Some(output) => output,
+        None => {
+            return Err(match last_not_found {
+                Some(err) => format!("Failed to locate a Python runtime for this project: {err}"),
+                None => "Failed to locate a Python runtime for this project.".to_string(),
+            });
+        }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let details = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("exit status {:?}", output.status.code())
+        };
+        return Err(format!("Python runtime failed: {details}"));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 fn python_runner_args(
     manifest: &Manifest,
     project_dir: &Path,
@@ -143,6 +200,7 @@ fn python_runner_args(
                 .join(&CAPABILITY_SEPARATOR.to_string()),
         );
         args.push(serialize_tools(&tools));
+        args.push(agent_cfg.script.clone().unwrap_or_default());
     }
 
     args

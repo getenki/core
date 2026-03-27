@@ -113,7 +113,7 @@ def main() -> None:
     module_cache = {}
 
     for _ in range(agent_count):
-        if index + 6 >= len(sys.argv):
+        if index + 7 >= len(sys.argv):
             raise RuntimeError("Missing arguments for configured agent")
 
         member_id = sys.argv[index]
@@ -123,15 +123,44 @@ def main() -> None:
         max_iterations = int(sys.argv[index + 4])
         capabilities = [value for value in sys.argv[index + 5].split(capability_separator) if value]
         serialized_tools = [value for value in sys.argv[index + 6].split(capability_separator) if value]
-        index += 7
+        script_path = sys.argv[index + 7]
+        index += 8
 
-        agent = Agent(
-            model,
-            name=name,
-            instructions=instructions,
-            max_iterations=max_iterations,
-            workspace_home=workspace_home,
-        )
+        if script_path:
+            module = load_python_module(project_dir, script_path)
+            agent = getattr(module, "agent", None)
+            if agent is None:
+                for obj in module.__dict__.values():
+                    if isinstance(obj, Agent):
+                        agent = obj
+                        break
+            if agent is None:
+                raise RuntimeError(f"Could not find an Agent instance in {script_path}")
+            
+            if getattr(agent, "workspace_home", None) is None:
+                agent.workspace_home = workspace_home # type: ignore
+
+            script_deps = getattr(module, "deps", None)
+            if script_deps is not None:
+                original_run = agent.run
+                original_run_sync = agent.run_sync
+                
+                async def patched_run(user_message: str, deps: Any = script_deps, **kwargs: Any) -> Any:
+                    return await original_run(user_message, deps=deps, **kwargs)
+                    
+                def patched_run_sync(user_message: str, deps: Any = script_deps, **kwargs: Any) -> Any:
+                    return original_run_sync(user_message, deps=deps, **kwargs)
+                    
+                agent.run = patched_run # type: ignore
+                agent.run_sync = patched_run_sync # type: ignore
+        else:
+            agent = Agent(
+                model,
+                name=name,
+                instructions=instructions,
+                max_iterations=max_iterations,
+                workspace_home=workspace_home,
+            )
         agent_config = {
             "id": member_id,
             "name": name,

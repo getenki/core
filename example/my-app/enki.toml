@@ -8,7 +8,14 @@ id = "assistant"
 max_iterations = 20
 model = "ollama::qwen3.5"
 name = "Personal Assistant"
-system_prompt = "You are a helpful personal assistant. Use Tools before answer"
+system_prompt = "You are a helpful personal assistant. You help users with tasks, answer questions, and provide guidance."
+
+[[agent]]
+id = "hr_manager_ast"
+model = "ollama::qwen3.5"
+name = "hr_manager_ast"
+script = "src/agents/hr_manager_ast.py"
+system_prompt = "You are a helpful assistant."
 tools = ["weather-tools"]
 
 [project]

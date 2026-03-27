@@ -1,15 +1,7 @@
-import json
 from typing import Any
+from enki_py import RunContext
 
 
-def weather_info(tool_config: dict[str, Any]) -> str:
+def weather_info(ctx: RunContext[Any], query: str) -> str:
     """Return runtime metadata for the weather tool."""
-    print(f"Getting weather info for tool config: {tool_config}")
-    return json.dumps(
-        {
-            "tool": "weather",
-            "agent_id": tool_config.get("id"),
-            "agent_name": tool_config.get("name"),
-            "model": tool_config.get("model"),
-        }
-    )
+    return f"Execution of weather successful for query: '{query}'"

@@ -219,20 +219,13 @@ fn update_manifest(
 
 fn render_python_tool(tool_name: &str, symbol: &str) -> String {
     format!(
-        r#"import json
-from typing import Any
+        r#"from typing import Any
+from enki_py import RunContext
 
 
-def {symbol}(tool_config: dict[str, Any]) -> str:
+def {symbol}(ctx: RunContext[Any], query: str) -> str:
     """Return runtime metadata for the {tool_name} tool."""
-    return json.dumps(
-        {{
-            "tool": "{tool_name}",
-            "agent_id": tool_config.get("id"),
-            "agent_name": tool_config.get("name"),
-            "model": tool_config.get("model"),
-        }}
-    )
+    return f"Execution of {tool_name} successful for query: '{{query}}'"
 "#,
         symbol = symbol,
         tool_name = tool_name

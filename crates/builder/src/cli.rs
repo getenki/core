@@ -29,6 +29,8 @@ pub enum Command {
     Monitor(MonitorArgs),
     /// Interactive human-in-the-loop REPL
     Join(JoinArgs),
+    /// Manage agent configurations
+    Agent(AgentArgs),
 }
 
 #[derive(Clone, ValueEnum)]
@@ -139,4 +141,30 @@ pub struct JoinArgs {
     /// Agent ID to interact with (defaults to the first agent)
     #[arg(long)]
     pub agent: Option<String>,
+}
+
+#[derive(Parser)]
+pub struct AgentArgs {
+    #[command(subcommand)]
+    pub command: AgentCommand,
+}
+
+#[derive(Subcommand)]
+pub enum AgentCommand {
+    /// Add a new agent to the project
+    Add(AddAgentArgs),
+}
+
+#[derive(Parser)]
+pub struct AddAgentArgs {
+    /// Path to enki.toml manifest
+    #[arg(long, default_value = "./enki.toml")]
+    pub manifest: PathBuf,
+
+    /// Name of the new agent
+    pub name: String,
+
+    /// Generate a boilerplate python script for the agent
+    #[arg(long, default_value_t = false)]
+    pub script: bool,
 }

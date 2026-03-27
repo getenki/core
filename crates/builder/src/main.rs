@@ -4,7 +4,7 @@ mod manifest;
 mod project_runtime;
 
 use clap::Parser;
-use cli::{Cli, Command, ToolCommand};
+use cli::{AgentCommand, Cli, Command, ToolCommand};
 
 #[tokio::main]
 async fn main() {
@@ -29,6 +29,9 @@ async fn main() {
         Command::Test(args) => commands::test::run(args).await,
         Command::Monitor(args) => commands::monitor::run(args).await,
         Command::Join(args) => commands::join::run(args).await,
+        Command::Agent(args) => match args.command {
+            AgentCommand::Add(args) => commands::agent::run(args),
+        },
     };
 
     if let Err(e) = result {

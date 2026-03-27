@@ -77,6 +77,8 @@ pub struct AgentConfig {
 
     #[serde(default)]
     pub tools: Vec<String>,
+
+    pub script: Option<String>,
 }
 
 fn default_max_iterations() -> usize {
