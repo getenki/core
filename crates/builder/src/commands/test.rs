@@ -1,11 +1,11 @@
 use crate::cli::TestArgs;
 use crate::manifest::Manifest;
+use crate::project_runtime;
 use core_next::agent::AgentDefinition;
 use core_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
 
 pub async fn run(args: TestArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
-
     let manifest_dir = args
         .manifest
         .parent()
@@ -16,7 +16,7 @@ pub async fn run(args: TestArgs) -> Result<(), String> {
         .to_string();
 
     println!(
-        "\x1b[1;36m⚡ Testing agents\x1b[0m from '{}'",
+        "\x1b[1;36mTesting agents\x1b[0m from '{}'",
         manifest.project.name
     );
     println!();
@@ -24,10 +24,30 @@ pub async fn run(args: TestArgs) -> Result<(), String> {
     let mut all_ok = true;
 
     for agent_cfg in &manifest.agents {
-        print!(
-            "  Testing '{}' ({})... ",
-            agent_cfg.id, agent_cfg.model
-        );
+        print!("  Testing '{}' ({})... ", agent_cfg.id, agent_cfg.model);
+
+        if project_runtime::is_python_project(manifest_dir) {
+            match project_runtime::run_python_agent(
+                &manifest,
+                manifest_dir,
+                &workspace_home,
+                &agent_cfg.id,
+                "test-session",
+                "Respond with OK",
+            )
+            .await
+            {
+                Ok(response) => {
+                    let preview: String = response.chars().take(80).collect();
+                    println!("\x1b[32m[ok]\x1b[0m  {}", preview);
+                }
+                Err(e) => {
+                    println!("\x1b[31m[fail]\x1b[0m  {}", e);
+                    all_ok = false;
+                }
+            }
+            continue;
+        }
 
         let builder = MultiAgentRuntimeBuilder::new()
             .with_workspace_home(&workspace_home)
@@ -43,24 +63,21 @@ pub async fn run(args: TestArgs) -> Result<(), String> {
             );
 
         match builder.build().await {
-            Ok(runtime) => {
-                // Send a simple ping
-                match runtime
-                    .process(&agent_cfg.id, "test-session", "Respond with OK")
-                    .await
-                {
-                    Ok(response) => {
-                        let preview: String = response.chars().take(80).collect();
-                        println!("\x1b[32m✓\x1b[0m  {}", preview);
-                    }
-                    Err(e) => {
-                        println!("\x1b[31m✗\x1b[0m  {}", e);
-                        all_ok = false;
-                    }
+            Ok(runtime) => match runtime
+                .process(&agent_cfg.id, "test-session", "Respond with OK")
+                .await
+            {
+                Ok(response) => {
+                    let preview: String = response.chars().take(80).collect();
+                    println!("\x1b[32m[ok]\x1b[0m  {}", preview);
                 }
-            }
+                Err(e) => {
+                    println!("\x1b[31m[fail]\x1b[0m  {}", e);
+                    all_ok = false;
+                }
+            },
             Err(e) => {
-                println!("\x1b[31m✗\x1b[0m  Build failed: {}", e);
+                println!("\x1b[31m[fail]\x1b[0m  Build failed: {}", e);
                 all_ok = false;
             }
         }
@@ -69,7 +86,7 @@ pub async fn run(args: TestArgs) -> Result<(), String> {
     println!();
     if all_ok {
         println!(
-            "\x1b[1;32m✓ All {} agent(s) passed\x1b[0m",
+            "\x1b[1;32mAll {} agent(s) passed\x1b[0m",
             manifest.agents.len()
         );
     } else {

@@ -1,10 +1,15 @@
 use crate::cli::RunArgs;
 use crate::manifest::Manifest;
+use crate::project_runtime;
 use core_next::agent::AgentDefinition;
 use core_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
 
 pub async fn run(args: RunArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
+    let project_dir = args
+        .manifest
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     let workspace_home = resolve_workspace_home(&args, &manifest);
 
     println!(
@@ -39,6 +44,22 @@ pub async fn run(args: RunArgs) -> Result<(), String> {
         println!("  \x1b[2mMessage:\x1b[0m {}", args.message);
         println!();
 
+        if project_runtime::is_python_project(project_dir) {
+            let response = project_runtime::run_python_agent(
+                &manifest,
+                project_dir,
+                &workspace_home,
+                &agent_cfg.id,
+                "cli-session",
+                &args.message,
+            )
+            .await?;
+
+            println!("\x1b[1;33m{}:\x1b[0m {}", agent_cfg.name, response);
+            println!();
+            return Ok(());
+        }
+
         let mut builder = MultiAgentRuntimeBuilder::new().with_workspace_home(&workspace_home);
 
         builder = builder.add_agent(
@@ -57,6 +78,30 @@ pub async fn run(args: RunArgs) -> Result<(), String> {
 
         println!("\x1b[1;33m{}:\x1b[0m {}", agent_cfg.name, response);
     } else {
+        if project_runtime::is_python_project(project_dir) {
+            let first_agent = &manifest.agents[0];
+            println!(
+                "  \x1b[2mRouting to:\x1b[0m {} (first agent)",
+                first_agent.name
+            );
+            println!("  \x1b[2mMessage:\x1b[0m {}", args.message);
+            println!();
+
+            let response = project_runtime::run_python_agent(
+                &manifest,
+                project_dir,
+                &workspace_home,
+                &first_agent.id,
+                "cli-session",
+                &args.message,
+            )
+            .await?;
+
+            println!("\x1b[1;33m{}:\x1b[0m {}", first_agent.name, response);
+            println!();
+            return Ok(());
+        }
+
         // Run all agents in a multi-agent runtime
         let mut builder = MultiAgentRuntimeBuilder::new().with_workspace_home(&workspace_home);
 

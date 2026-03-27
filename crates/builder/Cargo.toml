@@ -9,10 +9,8 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
-core_next = { path = "../core", package = "core", features = ["universal-llm-provider"] }
+core_next = { path = "../core", package = "core", features = [] }
 serde.workspace = true
-serde_json.workspace = true
 tokio.workspace = true
 toml.workspace = true
-tracing.workspace = true
 tracing-subscriber.workspace = true

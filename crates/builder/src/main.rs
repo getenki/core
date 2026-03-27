@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod manifest;
+mod project_runtime;
 
 use clap::Parser;
 use cli::{Cli, Command};

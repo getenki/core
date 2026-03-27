@@ -1,12 +1,12 @@
 use crate::cli::JoinArgs;
 use crate::manifest::Manifest;
+use crate::project_runtime;
 use core_next::agent::AgentDefinition;
 use core_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
 use std::io::{self, BufRead, Write};
 
 pub async fn run(args: JoinArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
-
     let manifest_dir = args
         .manifest
         .parent()
@@ -15,32 +15,30 @@ pub async fn run(args: JoinArgs) -> Result<(), String> {
         .join(&manifest.workspace.home)
         .to_string_lossy()
         .to_string();
+    let is_python_project = project_runtime::is_python_project(manifest_dir);
 
-    // Build the multi-agent runtime
-    let mut builder = MultiAgentRuntimeBuilder::new().with_workspace_home(&workspace_home);
-    for agent_cfg in &manifest.agents {
-        builder = builder.add_agent(
-            &agent_cfg.id,
-            AgentDefinition {
-                name: agent_cfg.name.clone(),
-                system_prompt_preamble: agent_cfg.system_prompt.clone(),
-                model: agent_cfg.model.clone(),
-                max_iterations: agent_cfg.max_iterations,
-            },
-            agent_cfg.capabilities.clone(),
-        );
-    }
+    let runtime = if is_python_project {
+        None
+    } else {
+        let mut builder = MultiAgentRuntimeBuilder::new().with_workspace_home(&workspace_home);
+        for agent_cfg in &manifest.agents {
+            builder = builder.add_agent(
+                &agent_cfg.id,
+                AgentDefinition {
+                    name: agent_cfg.name.clone(),
+                    system_prompt_preamble: agent_cfg.system_prompt.clone(),
+                    model: agent_cfg.model.clone(),
+                    max_iterations: agent_cfg.max_iterations,
+                },
+                agent_cfg.capabilities.clone(),
+            );
+        }
 
-    let runtime = builder.build().await?;
+        Some(builder.build().await?)
+    };
 
-    // Determine default agent
-    let default_agent_id = args
-        .agent
-        .as_deref()
-        .unwrap_or(&manifest.agents[0].id);
-
-    // Verify default agent exists
-    if runtime.registry().get(default_agent_id).await.is_none() {
+    let default_agent_id = args.agent.as_deref().unwrap_or(&manifest.agents[0].id);
+    if manifest.agents.iter().all(|agent| agent.id != default_agent_id) {
         return Err(format!(
             "Agent '{}' not found. Available: {}",
             default_agent_id,
@@ -55,32 +53,24 @@ pub async fn run(args: JoinArgs) -> Result<(), String> {
 
     let agent_ids: Vec<String> = manifest.agents.iter().map(|a| a.id.clone()).collect();
 
-    // Print welcome banner
     println!();
-    println!("\x1b[1;36m╔══════════════════════════════════════════════════════════╗\x1b[0m");
-    println!("\x1b[1;36m║\x1b[0m  \x1b[1mEnki Interactive Session\x1b[0m                                \x1b[1;36m║\x1b[0m");
-    println!("\x1b[1;36m║\x1b[0m  Project: {:<47}\x1b[1;36m║\x1b[0m", manifest.project.name);
-    println!("\x1b[1;36m╠══════════════════════════════════════════════════════════╣\x1b[0m");
-    println!("\x1b[1;36m║\x1b[0m                                                          \x1b[1;36m║\x1b[0m");
-    println!("\x1b[1;36m║\x1b[0m  \x1b[2mSend messages to agents:\x1b[0m                                \x1b[1;36m║\x1b[0m");
-    println!("\x1b[1;36m║\x1b[0m    \x1b[33m>\x1b[0m hello                    → default ({:<14})\x1b[1;36m║\x1b[0m", default_agent_id);
-    println!("\x1b[1;36m║\x1b[0m    \x1b[33m>\x1b[0m @agent-id hello          → specific agent       \x1b[1;36m║\x1b[0m");
-    println!("\x1b[1;36m║\x1b[0m    \x1b[33m>\x1b[0m /agents                  → list all agents       \x1b[1;36m║\x1b[0m");
-    println!("\x1b[1;36m║\x1b[0m    \x1b[33m>\x1b[0m quit                     → exit                  \x1b[1;36m║\x1b[0m");
-    println!("\x1b[1;36m║\x1b[0m                                                          \x1b[1;36m║\x1b[0m");
-    println!("\x1b[1;36m╚══════════════════════════════════════════════════════════╝\x1b[0m");
+    println!("\x1b[1;36mEnki Interactive Session\x1b[0m");
+    println!("  Project: {}", manifest.project.name);
+    println!("  Default agent: {}", default_agent_id);
+    println!("  Commands: /agents, quit");
+    println!("  Send to a specific agent with @agent-id <message>");
     println!();
 
     let stdin = io::stdin();
     let mut session_counter = 0u64;
 
     loop {
-        print!("\x1b[1;33m❯\x1b[0m ");
+        print!("\x1b[1;33m>\x1b[0m ");
         io::stdout().flush().map_err(|e| e.to_string())?;
 
         let mut line = String::new();
         match stdin.lock().read_line(&mut line) {
-            Ok(0) => break, // EOF
+            Ok(0) => break,
             Ok(_) => {}
             Err(_) => break,
         }
@@ -97,18 +87,17 @@ pub async fn run(args: JoinArgs) -> Result<(), String> {
             }
             "/agents" => {
                 println!();
-                let cards = runtime.registry().list_all().await;
-                for card in &cards {
-                    let marker = if card.agent_id == default_agent_id {
+                for agent_cfg in &manifest.agents {
+                    let marker = if agent_cfg.id == default_agent_id {
                         " \x1b[33m(default)\x1b[0m"
                     } else {
                         ""
                     };
                     println!(
-                        "  \x1b[36m•\x1b[0m {} ({}) — [{}]{}",
-                        card.agent_id,
-                        card.name,
-                        card.capabilities.join(", "),
+                        "  \x1b[36m*\x1b[0m {} ({}) [{}]{}",
+                        agent_cfg.id,
+                        agent_cfg.name,
+                        agent_cfg.capabilities.join(", "),
                         marker
                     );
                 }
@@ -118,7 +107,6 @@ pub async fn run(args: JoinArgs) -> Result<(), String> {
             _ => {}
         }
 
-        // Parse @agent-id prefix
         let (target_agent, message) = if input.starts_with('@') {
             if let Some(space_idx) = input.find(' ') {
                 let agent_id = &input[1..space_idx];
@@ -127,13 +115,13 @@ pub async fn run(args: JoinArgs) -> Result<(), String> {
                     (agent_id.to_string(), msg.to_string())
                 } else {
                     println!(
-                        "\n  \x1b[31m✗\x1b[0m Unknown agent '{}'. Type /agents to see available agents.\n",
+                        "\n  \x1b[31mError:\x1b[0m unknown agent '{}'. Type /agents to see available agents.\n",
                         agent_id
                     );
                     continue;
                 }
             } else {
-                println!("\n  \x1b[31m✗\x1b[0m Usage: @agent-id <message>\n");
+                println!("\n  \x1b[31mError:\x1b[0m usage: @agent-id <message>\n");
                 continue;
             }
         } else {
@@ -146,12 +134,26 @@ pub async fn run(args: JoinArgs) -> Result<(), String> {
         println!();
         println!("  \x1b[2m[{}]\x1b[0m", target_agent);
 
-        match runtime
-            .process(&target_agent, &session_id, &message)
+        let response = if is_python_project {
+            project_runtime::run_python_agent(
+                &manifest,
+                manifest_dir,
+                &workspace_home,
+                &target_agent,
+                &session_id,
+                &message,
+            )
             .await
-        {
+        } else {
+            runtime
+                .as_ref()
+                .expect("runtime available for non-Python projects")
+                .process(&target_agent, &session_id, &message)
+                .await
+        };
+
+        match response {
             Ok(response) => {
-                // Find agent name
                 let agent_name = manifest
                     .agents
                     .iter()
@@ -162,7 +164,7 @@ pub async fn run(args: JoinArgs) -> Result<(), String> {
                 println!("  \x1b[1;33m{}:\x1b[0m {}", agent_name, response);
             }
             Err(e) => {
-                println!("  \x1b[31m✗ Error:\x1b[0m {}", e);
+                println!("  \x1b[31mError:\x1b[0m {}", e);
             }
         }
 
