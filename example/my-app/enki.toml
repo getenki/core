@@ -1,14 +1,25 @@
+[[agent]]
+capabilities = [
+    "general",
+    "writing",
+    "analysis",
+]
+id = "assistant"
+max_iterations = 20
+model = "ollama::qwen3.5"
+name = "Personal Assistant"
+system_prompt = "You are a helpful personal assistant. You help users with tasks, answer questions, and provide guidance."
+tools = ["weather-tools"]
+
 [project]
 name = "my-app"
 version = "0.1.0"
 
+[[tool]]
+id = "weather-tools"
+kind = "python"
+path = "src/tools/weather.py"
+symbol = "register_weather_tools"
+
 [workspace]
 home = "./.enki"
-
-[[agent]]
-id = "assistant"
-name = "Personal Assistant"
-model = "ollama::qwen3.5"
-system_prompt = "You are a helpful personal assistant. You help users with tasks, answer questions, and provide guidance."
-max_iterations = 20
-capabilities = ["general", "writing", "analysis"]
