@@ -1,0 +1,14 @@
+[project]
+name = "{{PROJECT_NAME}}"
+version = "0.1.0"
+
+[workspace]
+home = "./.enki"
+
+[[agent]]
+id = "assistant"
+name = "Personal Assistant"
+model = "ollama::qwen3.5"
+system_prompt = "You are a helpful personal assistant. You help users with tasks, answer questions, and provide guidance."
+max_iterations = 20
+capabilities = ["general", "writing", "analysis"]

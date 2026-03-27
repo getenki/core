@@ -1,0 +1,12 @@
+[project]
+name = "{{PROJECT_NAME}}"
+version = "0.1.0"
+description = "An Enki multi-agent project"
+requires-python = ">=3.10"
+dependencies = [
+    "enki-py>=0.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

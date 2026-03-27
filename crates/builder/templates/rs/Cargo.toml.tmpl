@@ -1,0 +1,8 @@
+[package]
+name = "{{PROJECT_NAME}}"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+core_next = { git = "https://github.com/getenki/core.git", features = ["universal-llm-provider"] }
+tokio = { version = "1", features = ["full"] }
