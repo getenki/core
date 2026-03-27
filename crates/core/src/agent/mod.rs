@@ -1,5 +1,7 @@
 mod workspace;
 
+use async_trait::async_trait;
+
 use crate::agent::workspace::AgentWorkspace;
 #[cfg(all(not(target_arch = "wasm32"), feature = "universal-llm-provider"))]
 use crate::llm::UniversalLLMClient;
@@ -35,28 +37,130 @@ impl Default for AgentDefinition {
 }
 
 pub struct Agent {
-    definition: AgentDefinition,
-    tool_registry: ToolCallRegistry,
-    tool_executor: Box<dyn ToolExecutor>,
-    workspace: AgentWorkspace,
-    llm: Box<dyn LlmProvider>,
-    memory: MemoryManager,
+    pub definition: AgentDefinition,
+    pub tool_registry: ToolCallRegistry,
+    pub tool_executor: Box<dyn ToolExecutor>,
+    pub workspace: AgentWorkspace,
+    pub llm: Box<dyn LlmProvider>,
+    pub memory: MemoryManager,
+    pub agent_loop: Box<dyn AgentLoop>,
     #[cfg(target_arch = "wasm32")]
-    sessions: Mutex<HashMap<String, Vec<Message>>>,
+    pub sessions: Mutex<HashMap<String, Vec<Message>>>,
 }
 
-enum StepOutcome {
+#[async_trait(?Send)]
+pub trait AgentLoop {
+    async fn run(&self, agent: &Agent, session_id: &str, user_message: &str) -> String;
+}
+
+pub struct DefaultAgentLoop;
+
+#[async_trait(?Send)]
+impl AgentLoop for DefaultAgentLoop {
+    async fn run(&self, agent: &Agent, session_id: &str, user_message: &str) -> String {
+        let ctx = agent.workspace.tool_context(session_id);
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Err(e) = tokio::fs::create_dir_all(&ctx.workspace_dir).await {
+            return format!("Workspace error: {e}");
+        }
+
+        let mut messages = match agent.load_messages(session_id).await {
+            Ok(messages) => messages,
+            Err(e) => return format!("Session state error: {e}"),
+        };
+
+        if messages.is_empty() {
+            let memory_context = agent
+                .memory
+                .build_context(session_id, user_message)
+                .await
+                .unwrap_or_default();
+            messages.push(Message::system(agent.system_prompt(&ctx, &memory_context)));
+        }
+
+        let request_id = next_request_id();
+        let prev_message_id = messages.last().map(|message| message.message_id.clone());
+
+        messages.push(Message::user(
+            user_message.to_string(),
+            request_id,
+            prev_message_id,
+            None,
+        ));
+
+        for _ in 0..agent.definition.max_iterations {
+            match agent.step(&mut messages, &ctx).await {
+                Ok(StepOutcome::Continue) => {
+                    agent.persist_state(session_id, &messages).await;
+                }
+                Ok(StepOutcome::Final(content)) => {
+                    let _ = agent
+                        .memory
+                        .record_all(session_id, user_message, &content)
+                        .await;
+                    let _ = agent.memory.consolidate_all(session_id).await;
+                    agent.persist_state(session_id, &messages).await;
+                    return content;
+                }
+                Err(e) => {
+                    let content = format!("LLM error: {e}");
+                    Agent::push_out_message(
+                        &mut messages,
+                        serde_json::json!({
+                            "role": "assistant",
+                            "content": content,
+                        }),
+                    );
+                    agent.persist_state(session_id, &messages).await;
+                    return messages
+                        .last()
+                        .and_then(|message| {
+                            let value = Value::from(message);
+                            value
+                                .get("content")
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                        })
+                        .unwrap_or_else(|| "LLM error".to_string());
+                }
+            }
+        }
+
+        let content = "Max iterations reached.".to_string();
+        Agent::push_out_message(
+            &mut messages,
+            serde_json::json!({
+                "role": "assistant",
+                "content": content.clone(),
+            }),
+        );
+        let _ = agent
+            .memory
+            .record_all(session_id, user_message, &content)
+            .await;
+        let _ = agent.memory.consolidate_all(session_id).await;
+        agent.persist_state(session_id, &messages).await;
+        content
+    }
+}
+
+pub enum StepOutcome {
     Continue,
     Final(String),
 }
 
-struct ToolInvocation {
-    name: String,
-    args: Value,
-    call_id: Option<String>,
+pub struct ToolInvocation {
+    pub name: String,
+    pub args: Value,
+    pub call_id: Option<String>,
 }
 
 impl Agent {
+    pub fn with_agent_loop(mut self, agent_loop: Box<dyn AgentLoop>) -> Self {
+        self.agent_loop = agent_loop;
+        self
+    }
+
     fn with_builtin_tools(mut tool_registry: ToolRegistry) -> ToolRegistry {
         let mut builtin_registry = builtin_tools::default_registry();
         builtin_registry.append(&mut tool_registry);
@@ -206,12 +310,13 @@ impl Agent {
             tool_registry: ToolCallRegistry::new(tool_registry),
             tool_executor,
             workspace,
+            agent_loop: Box::new(DefaultAgentLoop),
             #[cfg(target_arch = "wasm32")]
             sessions: Mutex::new(HashMap::new()),
         })
     }
 
-    fn system_prompt(&self, ctx: &ToolContext, memory_context: &str) -> String {
+    pub fn system_prompt(&self, ctx: &ToolContext, memory_context: &str) -> String {
         let mut prompt = format!(
             r#"You are {}.
 {} Use tools via JSON calls when needed.
@@ -244,7 +349,7 @@ Current task workspace: {}
         prompt
     }
 
-    fn to_llm_messages(&self, messages: &[Message]) -> Vec<ChatMessage> {
+    pub fn to_llm_messages(&self, messages: &[Message]) -> Vec<ChatMessage> {
         messages
             .iter()
             .filter_map(|message| {
@@ -273,7 +378,7 @@ Current task workspace: {}
             .collect()
     }
 
-    fn tool_definitions(&self) -> Vec<ToolDefinition> {
+    pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
         self.tool_registry
             .catalog_json()
             .as_object()
@@ -292,14 +397,14 @@ Current task workspace: {}
             .unwrap_or_default()
     }
 
-    fn decode_tool_calls(&self, tool_calls: Vec<String>) -> Vec<Value> {
+    pub fn decode_tool_calls(&self, tool_calls: Vec<String>) -> Vec<Value> {
         tool_calls
             .into_iter()
             .filter_map(|tool_call| serde_json::from_str::<Value>(&tool_call).ok())
             .collect()
     }
 
-    async fn call_llm(&self, messages: &[Message]) -> Result<Value, String> {
+    pub async fn call_llm(&self, messages: &[Message]) -> Result<Value, String> {
         let tool_definitions = self.tool_definitions();
         let response = self
             .llm
@@ -324,12 +429,12 @@ Current task workspace: {}
         Ok(assistant_message)
     }
 
-    fn parse_content_tool_call(&self, assistant_message: &Value) -> Option<(String, Value)> {
+    pub fn parse_content_tool_call(&self, assistant_message: &Value) -> Option<(String, Value)> {
         let content = assistant_message.get("content")?.as_str()?;
         Self::extract_embedded_tool_call(content)
     }
 
-    fn extract_embedded_tool_call(content: &str) -> Option<(String, Value)> {
+    pub fn extract_embedded_tool_call(content: &str) -> Option<(String, Value)> {
         if let Some(tool_call) = Self::parse_tool_call_value(content) {
             return Some(tool_call);
         }
@@ -355,7 +460,7 @@ Current task workspace: {}
         None
     }
 
-    fn extract_fenced_code_blocks(content: &str) -> Vec<&str> {
+    pub fn extract_fenced_code_blocks(content: &str) -> Vec<&str> {
         let mut blocks = Vec::new();
         let mut remaining = content;
 
@@ -380,7 +485,7 @@ Current task workspace: {}
 
     /// Try to parse as a tool call, and if that fails, attempt to repair common
     /// LLM mistakes such as missing trailing closing braces.
-    fn parse_tool_call_value(raw: &str) -> Option<(String, Value)> {
+    pub fn parse_tool_call_value(raw: &str) -> Option<(String, Value)> {
         // Try as-is first
         if let Some(result) = Self::try_parse_tool_call(raw) {
             return Some(result);
@@ -399,14 +504,14 @@ Current task workspace: {}
         None
     }
 
-    fn try_parse_tool_call(raw: &str) -> Option<(String, Value)> {
+    pub fn try_parse_tool_call(raw: &str) -> Option<(String, Value)> {
         let parsed: Value = serde_json::from_str(raw).ok()?;
         let tool_name = parsed.get("tool")?.as_str()?.to_string();
         let args = parsed.get("args").cloned().unwrap_or(Value::Null);
         Some((tool_name, args))
     }
 
-    fn json_object_candidates(content: &str) -> Vec<&str> {
+    pub fn json_object_candidates(content: &str) -> Vec<&str> {
         let mut candidates = Vec::new();
         let mut start = None;
         let mut depth = 0usize;
@@ -465,7 +570,7 @@ Current task workspace: {}
         candidates
     }
 
-    async fn load_messages(&self, session_id: &str) -> Result<Vec<Message>, String> {
+    pub async fn load_messages(&self, session_id: &str) -> Result<Vec<Message>, String> {
         #[cfg(target_arch = "wasm32")]
         {
             return Ok(self
@@ -504,7 +609,7 @@ Current task workspace: {}
             .map_err(|_| "Failed to decode session messages.".to_string())
     }
 
-    async fn save_messages(&self, session_id: &str, messages: &[Message]) -> Result<(), String> {
+    pub async fn save_messages(&self, session_id: &str, messages: &[Message]) -> Result<(), String> {
         #[cfg(target_arch = "wasm32")]
         {
             self.sessions
@@ -539,21 +644,21 @@ Current task workspace: {}
             .map_err(|e| format!("Failed to write session state: {e}"))
     }
 
-    async fn persist(&self, session_id: &str) {
+    pub async fn persist(&self, session_id: &str) {
         let _ = self.memory.flush_all(session_id).await;
     }
 
-    async fn persist_state(&self, session_id: &str, messages: &[Message]) {
+    pub async fn persist_state(&self, session_id: &str, messages: &[Message]) {
         let _ = self.save_messages(session_id, messages).await;
         self.persist(session_id).await;
     }
 
-    fn push_out_message(messages: &mut Vec<Message>, value: Value) {
+    pub fn push_out_message(messages: &mut Vec<Message>, value: Value) {
         let prev_message_id = messages.last().map(|message| message.message_id.clone());
         messages.push(Message::out(value, prev_message_id));
     }
 
-    fn extract_tool_invocations(&self, assistant_message: &Value) -> Vec<ToolInvocation> {
+    pub fn extract_tool_invocations(&self, assistant_message: &Value) -> Vec<ToolInvocation> {
         let native_calls = assistant_message
             .get("tool_calls")
             .and_then(Value::as_array)
@@ -598,7 +703,7 @@ Current task workspace: {}
             .unwrap_or_default()
     }
 
-    async fn build_tool_result_messages(
+    pub async fn build_tool_result_messages(
         &self,
         invocations: Vec<ToolInvocation>,
         ctx: &ToolContext,
@@ -623,7 +728,7 @@ Current task workspace: {}
         messages
     }
 
-    async fn step(
+    pub async fn step(
         &self,
         messages: &mut Vec<Message>,
         ctx: &ToolContext,
@@ -652,89 +757,7 @@ Current task workspace: {}
     }
 
     pub async fn run(&self, session_id: &str, user_message: &str) -> String {
-        let ctx = self.workspace.tool_context(session_id);
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Err(e) = tokio::fs::create_dir_all(&ctx.workspace_dir).await {
-            return format!("Workspace error: {e}");
-        }
-
-        let mut messages = match self.load_messages(session_id).await {
-            Ok(messages) => messages,
-            Err(e) => return format!("Session state error: {e}"),
-        };
-
-        if messages.is_empty() {
-            let memory_context = self
-                .memory
-                .build_context(session_id, user_message)
-                .await
-                .unwrap_or_default();
-            messages.push(Message::system(self.system_prompt(&ctx, &memory_context)));
-        }
-
-        let request_id = next_request_id();
-        let prev_message_id = messages.last().map(|message| message.message_id.clone());
-
-        messages.push(Message::user(
-            user_message.to_string(),
-            request_id,
-            prev_message_id,
-            None,
-        ));
-
-        for _ in 0..self.definition.max_iterations {
-            match self.step(&mut messages, &ctx).await {
-                Ok(StepOutcome::Continue) => {
-                    self.persist_state(session_id, &messages).await;
-                }
-                Ok(StepOutcome::Final(content)) => {
-                    let _ = self
-                        .memory
-                        .record_all(session_id, user_message, &content)
-                        .await;
-                    let _ = self.memory.consolidate_all(session_id).await;
-                    self.persist_state(session_id, &messages).await;
-                    return content;
-                }
-                Err(e) => {
-                    let content = format!("LLM error: {e}");
-                    Self::push_out_message(
-                        &mut messages,
-                        serde_json::json!({
-                            "role": "assistant",
-                            "content": content,
-                        }),
-                    );
-                    self.persist_state(session_id, &messages).await;
-                    return messages
-                        .last()
-                        .and_then(|message| {
-                            let value = Value::from(message);
-                            value
-                                .get("content")
-                                .and_then(Value::as_str)
-                                .map(str::to_string)
-                        })
-                        .unwrap_or_else(|| "LLM error".to_string());
-                }
-            }
-        }
-
-        let content = "Max iterations reached.".to_string();
-        Self::push_out_message(
-            &mut messages,
-            serde_json::json!({
-                "role": "assistant",
-                "content": content.clone(),
-            }),
-        );
-        let _ = self
-            .memory
-            .record_all(session_id, user_message, &content)
-            .await;
-        let _ = self.memory.consolidate_all(session_id).await;
-        self.persist_state(session_id, &messages).await;
-        content
+        self.agent_loop.run(self, session_id, user_message).await
     }
 }
 
