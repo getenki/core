@@ -1,30 +1,139 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::agent::core::Agent;
 use crate::agent::types::StepOutcome;
 use crate::message::{Message, next_request_id};
+use crate::tooling::types::ToolContext;
 
 #[async_trait(?Send)]
 pub trait AgentLoop {
     async fn run(&self, agent: &Agent, session_id: &str, user_message: &str) -> String;
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LoopPhase {
+    Understand,
+    Plan,
+    Act,
+    Observe,
+    Recover,
+    Finalize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BudgetState {
+    pub llm_calls: usize,
+    pub tool_calls: usize,
+    pub iterations: usize,
+    pub retries: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionState {
+    pub phase: LoopPhase,
+    pub budget: BudgetState,
+    pub last_error: Option<String>,
+}
+
+impl Default for ExecutionState {
+    fn default() -> Self {
+        Self {
+            phase: LoopPhase::Understand,
+            budget: BudgetState::default(),
+            last_error: None,
+        }
+    }
+}
+
+/// A richer loop result than plain Continue / Final.
+/// This is the main extension point for planner/executor and verifier patterns.
+#[derive(Debug, Clone)]
+pub enum LoopDirective {
+    Continue {
+        next_phase: LoopPhase,
+        tool_calls_made: usize,
+    },
+    Retry {
+        reason: String,
+        next_phase: LoopPhase,
+    },
+    Final(String),
+}
+
 pub struct DefaultAgentLoop;
 
-#[async_trait(?Send)]
-impl AgentLoop for DefaultAgentLoop {
-    async fn run(&self, agent: &Agent, session_id: &str, user_message: &str) -> String {
-        let ctx = agent.workspace.tool_context(session_id);
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Err(e) = tokio::fs::create_dir_all(&ctx.workspace_dir).await {
-            return format!("Workspace error: {e}");
+impl DefaultAgentLoop {
+    async fn load_execution_state(&self, agent: &Agent, session_id: &str) -> ExecutionState {
+        // Swap this for real persisted state storage when ready.
+        // For now, start fresh each run.
+        let _ = (agent, session_id);
+        ExecutionState::default()
+    }
+
+    async fn persist_execution_state(
+        &self,
+        agent: &Agent,
+        session_id: &str,
+        state: &ExecutionState,
+    ) {
+        // Swap this for real persistence alongside message state.
+        let _ = (agent, session_id, state);
+    }
+
+    fn max_retries(&self) -> usize {
+        2
+    }
+
+    fn tool_calls_from_messages(&self, messages: &[Message]) -> usize {
+        messages
+            .iter()
+            .filter_map(|message| {
+                let value = Value::from(message);
+                value
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .map(Vec::len)
+            })
+            .sum()
+    }
+
+    fn should_stop(&self, agent: &Agent, state: &ExecutionState) -> Option<String> {
+        if state.budget.iterations >= agent.definition.max_iterations {
+            return Some("Max iterations reached.".to_string());
         }
 
-        let mut messages = match agent.load_messages(session_id).await {
-            Ok(messages) => messages,
-            Err(e) => return format!("Session state error: {e}"),
-        };
+        // Optional future knobs:
+        // - max_llm_calls
+        // - max_tool_calls
+        // - max_cost
+        // Until then, use conservative soft guards.
+        let llm_cap = agent.definition.max_iterations;
+        if state.budget.llm_calls >= llm_cap {
+            return Some("LLM call budget exhausted.".to_string());
+        }
+
+        None
+    }
+
+    async fn initialize_messages(
+        &self,
+        agent: &Agent,
+        session_id: &str,
+        user_message: &str,
+    ) -> Result<Vec<Message>, String> {
+        let ctx = agent.workspace.tool_context(session_id);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Err(e) = tokio::fs::create_dir_all(&ctx.workspace_dir).await {
+            return Err(format!("Workspace error: {e}"));
+        }
+
+        let mut messages = agent
+            .load_messages(session_id)
+            .await
+            .map_err(|e| format!("Session state error: {e}"))?;
 
         if messages.is_empty() {
             let memory_context = agent
@@ -32,6 +141,7 @@ impl AgentLoop for DefaultAgentLoop {
                 .build_context(session_id, user_message)
                 .await
                 .unwrap_or_default();
+
             messages.push(Message::system(agent.system_prompt(&ctx, &memory_context)));
         }
 
@@ -45,58 +155,210 @@ impl AgentLoop for DefaultAgentLoop {
             None,
         ));
 
-        for _ in 0..agent.definition.max_iterations {
-            match agent.step(&mut messages, &ctx).await {
+        Ok(messages)
+    }
+
+    async fn step_with_phase(
+        &self,
+        agent: &Agent,
+        messages: &mut Vec<Message>,
+        ctx: &mut ToolContext,
+        state: &mut ExecutionState,
+    ) -> Result<LoopDirective, String> {
+        let tool_calls_before = self.tool_calls_from_messages(messages);
+
+        state.budget.llm_calls += 1;
+
+        // Right now, the underlying agent.step still owns the actual LLM/tool turn.
+        // We wrap it with explicit loop semantics.
+        match state.phase {
+            LoopPhase::Understand
+            | LoopPhase::Plan
+            | LoopPhase::Act
+            | LoopPhase::Observe
+            | LoopPhase::Recover => match agent.step(messages, ctx).await {
                 Ok(StepOutcome::Continue) => {
-                    agent.persist_state(session_id, &messages).await;
+                    let tool_calls_after = self.tool_calls_from_messages(messages);
+                    let new_tool_calls = tool_calls_after.saturating_sub(tool_calls_before);
+
+                    let next_phase = if new_tool_calls > 0 {
+                        LoopPhase::Observe
+                    } else {
+                        LoopPhase::Act
+                    };
+
+                    Ok(LoopDirective::Continue {
+                        next_phase,
+                        tool_calls_made: new_tool_calls,
+                    })
                 }
-                Ok(StepOutcome::Final(content)) => {
-                    let _ = agent
-                        .memory
-                        .record_all(session_id, user_message, &content)
-                        .await;
-                    let _ = agent.memory.consolidate_all(session_id).await;
-                    agent.persist_state(session_id, &messages).await;
-                    return content;
-                }
-                Err(e) => {
-                    let content = format!("LLM error: {e}");
-                    Agent::push_out_message(
-                        &mut messages,
-                        serde_json::json!({
-                            "role": "assistant",
-                            "content": content,
-                        }),
-                    );
-                    agent.persist_state(session_id, &messages).await;
-                    return messages
-                        .last()
-                        .and_then(|message| {
-                            let value = Value::from(message);
-                            value
-                                .get("content")
-                                .and_then(Value::as_str)
-                                .map(str::to_string)
-                        })
-                        .unwrap_or_else(|| "LLM error".to_string());
-                }
+                Ok(StepOutcome::Final(content)) => Ok(LoopDirective::Final(content)),
+                Err(e) => Ok(LoopDirective::Retry {
+                    reason: e.to_string(),
+                    next_phase: LoopPhase::Recover,
+                }),
+            },
+            LoopPhase::Finalize => {
+                // Defensive fallback.
+                Ok(LoopDirective::Final("Done.".to_string()))
             }
         }
+    }
 
-        let content = "Max iterations reached.".to_string();
-        Agent::push_out_message(
-            &mut messages,
-            serde_json::json!({
-                "role": "assistant",
-                "content": content.clone(),
-            }),
-        );
+    async fn finalize_success(
+        &self,
+        agent: &Agent,
+        session_id: &str,
+        user_message: &str,
+        messages: &mut Vec<Message>,
+        state: &ExecutionState,
+        content: String,
+    ) -> String {
         let _ = agent
             .memory
             .record_all(session_id, user_message, &content)
             .await;
         let _ = agent.memory.consolidate_all(session_id).await;
-        agent.persist_state(session_id, &messages).await;
+
+        agent.persist_state(session_id, messages).await;
+        self.persist_execution_state(agent, session_id, state).await;
+
         content
+    }
+
+    async fn finalize_failure(
+        &self,
+        agent: &Agent,
+        session_id: &str,
+        user_message: &str,
+        messages: &mut Vec<Message>,
+        state: &ExecutionState,
+        content: String,
+    ) -> String {
+        Agent::push_out_message(
+            messages,
+            serde_json::json!({
+                "role": "assistant",
+                "content": content.clone(),
+            }),
+        );
+
+        let _ = agent
+            .memory
+            .record_all(session_id, user_message, &content)
+            .await;
+        let _ = agent.memory.consolidate_all(session_id).await;
+
+        agent.persist_state(session_id, messages).await;
+        self.persist_execution_state(agent, session_id, state).await;
+
+        content
+    }
+}
+
+#[async_trait(?Send)]
+impl AgentLoop for DefaultAgentLoop {
+    async fn run(&self, agent: &Agent, session_id: &str, user_message: &str) -> String {
+        let mut ctx = agent.workspace.tool_context(session_id);
+
+        let mut messages = match self
+            .initialize_messages(agent, session_id, user_message)
+            .await
+        {
+            Ok(messages) => messages,
+            Err(e) => return e,
+        };
+
+        let mut state = self.load_execution_state(agent, session_id).await;
+        state.phase = LoopPhase::Understand;
+
+        loop {
+            if let Some(stop_reason) = self.should_stop(agent, &state) {
+                return self
+                    .finalize_failure(
+                        agent,
+                        session_id,
+                        user_message,
+                        &mut messages,
+                        &state,
+                        stop_reason,
+                    )
+                    .await;
+            }
+
+            state.budget.iterations += 1;
+
+            let directive = match self
+                .step_with_phase(agent, &mut messages, &mut ctx, &mut state)
+                .await
+            {
+                Ok(directive) => directive,
+                Err(e) => LoopDirective::Retry {
+                    reason: e,
+                    next_phase: LoopPhase::Recover,
+                },
+            };
+
+            match directive {
+                LoopDirective::Continue {
+                    next_phase,
+                    tool_calls_made,
+                } => {
+                    state.phase = next_phase;
+                    state.budget.tool_calls += tool_calls_made;
+                    state.last_error = None;
+
+                    agent.persist_state(session_id, &messages).await;
+                    self.persist_execution_state(agent, session_id, &state)
+                        .await;
+                }
+
+                LoopDirective::Retry { reason, next_phase } => {
+                    state.budget.retries += 1;
+                    state.last_error = Some(reason.clone());
+                    state.phase = next_phase;
+
+                    if state.budget.retries > self.max_retries() {
+                        let content = format!("LLM error: {reason}");
+                        return self
+                            .finalize_failure(
+                                agent,
+                                session_id,
+                                user_message,
+                                &mut messages,
+                                &state,
+                                content,
+                            )
+                            .await;
+                    }
+
+                    Agent::push_out_message(
+                        &mut messages,
+                        serde_json::json!({
+                            "role": "assistant",
+                            "content": format!("Recovering from error: {reason}"),
+                        }),
+                    );
+
+                    agent.persist_state(session_id, &messages).await;
+                    self.persist_execution_state(agent, session_id, &state)
+                        .await;
+                }
+
+                LoopDirective::Final(content) => {
+                    state.phase = LoopPhase::Finalize;
+                    return self
+                        .finalize_success(
+                            agent,
+                            session_id,
+                            user_message,
+                            &mut messages,
+                            &state,
+                            content,
+                        )
+                        .await;
+                }
+            }
+        }
     }
 }
