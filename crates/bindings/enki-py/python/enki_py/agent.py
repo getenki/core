@@ -19,6 +19,8 @@ try:
     from .enki_py import EnkiMemoryKind as _LowLevelMemoryKind
     from .enki_py import EnkiMemoryModule as _LowLevelMemoryModule
     from .enki_py import EnkiToolHandler
+    from .enki_py import EnkiStepHandler
+    from .enki_py import EnkiExecutionStep as _LowLevelExecutionStep
 except ImportError:  # pragma: no cover
     class _LowLevelEnkiAgent:  # type: ignore[override]
         pass
@@ -593,6 +595,20 @@ def _try_set_uniffi_event_loop() -> None:
         _uniffi_set_event_loop(loop)
 
 
+class _PythonStepHandler(EnkiStepHandler):
+    def __init__(self, hook: Callable[[ExecutionStep], None]) -> None:
+        self._hook = hook
+
+    def on_step(self, step: _LowLevelExecutionStep) -> None:
+        python_step = ExecutionStep(
+            index=step.index,
+            phase=step.phase,
+            kind=step.kind,
+            detail=step.detail
+        )
+        _resolve_callback_result(self._hook(python_step))
+
+
 async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
@@ -860,13 +876,26 @@ class Agent(Generic[DepsT]):
             *,
             deps: DepsT | None = None,
             session_id: str | None = None,
+            on_step: Callable[[ExecutionStep], None] | None = None,
     ) -> AgentRunResult:
         backend = self._ensure_backend()
         session_id = session_id or f"session-{uuid.uuid4()}"
         _try_set_uniffi_event_loop()
         self._handler.set_deps(deps)
         try:
-            if hasattr(backend, "run_with_trace"):
+            if hasattr(backend, "run_with_events") and on_step is not None:
+                raw_result = await backend.run_with_events(session_id, user_message, _PythonStepHandler(on_step))
+                output = raw_result.output
+                steps = [
+                    ExecutionStep(
+                        index=step.index,
+                        phase=step.phase,
+                        kind=step.kind,
+                        detail=step.detail,
+                    )
+                    for step in getattr(raw_result, "steps", [])
+                ]
+            elif hasattr(backend, "run_with_trace"):
                 raw_result = await backend.run_with_trace(session_id, user_message)
                 output = raw_result.output
                 steps = [
@@ -891,11 +920,12 @@ class Agent(Generic[DepsT]):
             *,
             deps: DepsT | None = None,
             session_id: str | None = None,
+            on_step: Callable[[ExecutionStep], None] | None = None,
     ) -> AgentRunResult:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.run(user_message, deps=deps, session_id=session_id))
+            return asyncio.run(self.run(user_message, deps=deps, session_id=session_id, on_step=on_step))
 
         result_box: dict[str, AgentRunResult] = {}
         error_box: dict[str, BaseException] = {}
@@ -1015,11 +1045,12 @@ class MultiAgentRuntime:
             user_message: str,
             *,
             session_id: str | None = None,
+            on_step: Callable[[ExecutionStep], None] | None = None,
     ) -> AgentRunResult:
         member = self._members.get(agent_id)
         if member is None:
             raise ValueError(f"Agent '{agent_id}' not found in runtime.")
-        return await member.agent.run(user_message, session_id=session_id)
+        return await member.agent.run(user_message, session_id=session_id, on_step=on_step)
 
     def process_sync(
             self,
@@ -1027,11 +1058,12 @@ class MultiAgentRuntime:
             user_message: str,
             *,
             session_id: str | None = None,
+            on_step: Callable[[ExecutionStep], None] | None = None,
     ) -> AgentRunResult:
         member = self._members.get(agent_id)
         if member is None:
             raise ValueError(f"Agent '{agent_id}' not found in runtime.")
-        return member.agent.run_sync(user_message, session_id=session_id)
+        return member.agent.run_sync(user_message, session_id=session_id, on_step=on_step)
 
 
 __all__ = [

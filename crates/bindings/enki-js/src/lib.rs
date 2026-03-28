@@ -1163,7 +1163,7 @@ fn spawn_agent_worker(
 
     for request in request_rx {
       let response =
-        runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message));
+        runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message, None));
       let _ = request.reply_tx.send(response);
     }
   });
@@ -1243,7 +1243,7 @@ fn spawn_multi_agent_worker(
           reply_tx,
         } => {
           let response = runtime
-            .block_on(runtime_instance.process_detailed(&agent_id, &session_id, &user_message));
+            .block_on(runtime_instance.process_detailed(&agent_id, &session_id, &user_message, None));
           let _ = reply_tx.send(response);
         }
         MultiAgentRequest::Registry { reply_tx } => {

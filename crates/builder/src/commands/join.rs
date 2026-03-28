@@ -144,6 +144,7 @@ pub async fn run(args: JoinArgs) -> Result<(), String> {
                 &target_agent,
                 &session_id,
                 &message,
+                false,
             )
             .await
         } else {

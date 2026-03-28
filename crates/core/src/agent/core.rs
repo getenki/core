@@ -8,7 +8,9 @@ use std::sync::Mutex;
 use serde_json::Value;
 
 use crate::agent::agent_loop::{AgentLoop, DefaultAgentLoop};
-use crate::agent::types::{AgentDefinition, AgentRunResult, StepOutcome, ToolInvocation};
+use crate::agent::types::{
+    AgentDefinition, AgentRunResult, StepOutcome, ToolCallTrace, ToolInvocation,
+};
 use crate::agent::workspace::AgentWorkspace;
 #[cfg(all(not(target_arch = "wasm32"), feature = "universal-llm-provider"))]
 use crate::llm::UniversalLLMClient;
@@ -583,12 +585,13 @@ Current task workspace: {}
             .unwrap_or_default()
     }
 
-    pub async fn build_tool_result_messages(
+    pub async fn execute_tool_invocations(
         &self,
         invocations: Vec<ToolInvocation>,
         ctx: &ToolContext,
         parent_message_id: Option<String>,
-    ) -> Vec<Message> {
+    ) -> (Vec<ToolCallTrace>, Vec<Message>) {
+        let mut traces = Vec::with_capacity(invocations.len());
         let mut messages = Vec::with_capacity(invocations.len());
 
         for invocation in invocations {
@@ -602,10 +605,20 @@ Current task workspace: {}
                     invocation.call_id.as_deref(),
                 )
                 .await;
+            traces.push(ToolCallTrace {
+                name: invocation.name.clone(),
+                args: invocation.args.clone(),
+                call_id: invocation.call_id.clone(),
+                result: tool_message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            });
             messages.push(Message::out(tool_message, parent_message_id.clone()));
         }
 
-        messages
+        (traces, messages)
     }
 
     pub async fn step(
@@ -624,11 +637,14 @@ Current task workspace: {}
                 .iter()
                 .map(|invocation| invocation.name.clone())
                 .collect();
-            let tool_messages = self
-                .build_tool_result_messages(invocations, ctx, parent_message_id)
+            let (tool_traces, tool_messages) = self
+                .execute_tool_invocations(invocations, ctx, parent_message_id)
                 .await;
             messages.extend(tool_messages);
-            return Ok(StepOutcome::Continue { tool_names });
+            return Ok(StepOutcome::Continue {
+                tool_names,
+                tool_traces,
+            });
         }
 
         let content = assistant_message
@@ -644,9 +660,14 @@ Current task workspace: {}
         self.agent_loop.run(self, session_id, user_message).await
     }
 
-    pub async fn run_detailed(&self, session_id: &str, user_message: &str) -> AgentRunResult {
+    pub async fn run_detailed(
+        &self,
+        session_id: &str,
+        user_message: &str,
+        on_step: Option<std::sync::Arc<dyn Fn(crate::agent::types::ExecutionStep) + Send + Sync>>,
+    ) -> AgentRunResult {
         self.agent_loop
-            .run_detailed(self, session_id, user_message)
+            .run_detailed(self, session_id, user_message, on_step)
             .await
     }
 }

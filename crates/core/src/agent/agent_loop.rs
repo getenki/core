@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::agent::core::Agent;
-use crate::agent::types::{AgentRunResult, ExecutionStep, StepOutcome};
+use crate::agent::types::{AgentRunResult, ExecutionStep, StepOutcome, ToolCallTrace};
 use crate::message::{Message, next_request_id};
 use crate::tooling::types::ToolContext;
 
@@ -14,10 +14,11 @@ pub trait AgentLoop {
         agent: &Agent,
         session_id: &str,
         user_message: &str,
+        on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
     ) -> AgentRunResult;
 
     async fn run(&self, agent: &Agent, session_id: &str, user_message: &str) -> String {
-        self.run_detailed(agent, session_id, user_message)
+        self.run_detailed(agent, session_id, user_message, None)
             .await
             .content
     }
@@ -66,6 +67,7 @@ pub enum LoopDirective {
         next_phase: LoopPhase,
         tool_calls_made: usize,
         tool_names: Vec<String>,
+        tool_traces: Vec<ToolCallTrace>,
     },
     Retry {
         reason: String,
@@ -77,19 +79,39 @@ pub enum LoopDirective {
 pub struct DefaultAgentLoop;
 
 impl DefaultAgentLoop {
+    fn summarize_json(value: &Value) -> String {
+        let raw = value.to_string();
+        Self::truncate_detail(&raw, 160)
+    }
+
+    fn truncate_detail(raw: &str, max_len: usize) -> String {
+        let mut chars = raw.chars();
+        let truncated: String = chars.by_ref().take(max_len).collect();
+        if chars.next().is_some() {
+            format!("{truncated}...")
+        } else {
+            truncated
+        }
+    }
+
     fn push_step(
         &self,
+        on_step_cb: Option<&std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
         steps: &mut Vec<ExecutionStep>,
         phase: &LoopPhase,
         kind: impl Into<String>,
         detail: impl Into<String>,
     ) {
-        steps.push(ExecutionStep {
+        let step = ExecutionStep {
             index: steps.len() + 1,
             phase: format!("{phase:?}"),
             kind: kind.into(),
             detail: detail.into(),
-        });
+        };
+        if let Some(on_step) = on_step_cb {
+            on_step(step.clone());
+        }
+        steps.push(step);
     }
 
     async fn load_execution_state(&self, agent: &Agent, session_id: &str) -> ExecutionState {
@@ -204,7 +226,10 @@ impl DefaultAgentLoop {
             | LoopPhase::Act
             | LoopPhase::Observe
             | LoopPhase::Recover => match agent.step(messages, ctx).await {
-                Ok(StepOutcome::Continue { tool_names }) => {
+                Ok(StepOutcome::Continue {
+                    tool_names,
+                    tool_traces,
+                }) => {
                     let tool_calls_after = self.tool_calls_from_messages(messages);
                     let new_tool_calls = tool_calls_after.saturating_sub(tool_calls_before);
 
@@ -218,6 +243,7 @@ impl DefaultAgentLoop {
                         next_phase,
                         tool_calls_made: new_tool_calls,
                         tool_names,
+                        tool_traces,
                     })
                 }
                 Ok(StepOutcome::Final(content)) => Ok(LoopDirective::Final(content)),
@@ -293,6 +319,7 @@ impl AgentLoop for DefaultAgentLoop {
         agent: &Agent,
         session_id: &str,
         user_message: &str,
+        on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
     ) -> AgentRunResult {
         let mut ctx = agent.workspace.tool_context(session_id);
         let mut steps = Vec::new();
@@ -304,6 +331,7 @@ impl AgentLoop for DefaultAgentLoop {
             Ok(messages) => messages,
             Err(e) => {
                 self.push_step(
+                    on_step.as_ref(),
                     &mut steps,
                     &LoopPhase::Understand,
                     "error",
@@ -316,6 +344,7 @@ impl AgentLoop for DefaultAgentLoop {
         let mut state = self.load_execution_state(agent, session_id).await;
         state.phase = LoopPhase::Understand;
         self.push_step(
+            on_step.as_ref(),
             &mut steps,
             &state.phase,
             "start",
@@ -331,6 +360,7 @@ impl AgentLoop for DefaultAgentLoop {
             let current_phase = state.phase.clone();
             let iteration = state.budget.iterations + 1;
             self.push_step(
+                on_step.as_ref(),
                 &mut steps,
                 &current_phase,
                 "iteration",
@@ -345,6 +375,7 @@ impl AgentLoop for DefaultAgentLoop {
             if let Some(stop_reason) = self.should_stop(agent, &state) {
                 tracing::warn!(reason = %stop_reason, "Stopping agent loop prematurely");
                 self.push_step(
+                    on_step.as_ref(),
                     &mut steps,
                     &state.phase,
                     "stop",
@@ -381,12 +412,37 @@ impl AgentLoop for DefaultAgentLoop {
                     next_phase,
                     tool_calls_made,
                     tool_names,
+                    tool_traces,
                 } => {
                     tracing::info!(
                         next_phase = ?next_phase,
                         tool_calls = tool_calls_made,
                         "Continuing agent loop"
                     );
+                    for trace in &tool_traces {
+                        self.push_step(
+                            on_step.as_ref(),
+                            &mut steps,
+                            &state.phase,
+                            "tool_call",
+                            format!(
+                                "Calling tool `{}` with args {}",
+                                trace.name,
+                                Self::summarize_json(&trace.args)
+                            ),
+                        );
+                        self.push_step(
+                            on_step.as_ref(),
+                            &mut steps,
+                            &state.phase,
+                            "tool_result",
+                            format!(
+                                "Tool `{}` returned {}",
+                                trace.name,
+                                Self::truncate_detail(&trace.result, 160)
+                            ),
+                        );
+                    }
                     let detail = if tool_names.is_empty() {
                         format!("No tool call. Advancing to {next_phase:?}")
                     } else {
@@ -395,7 +451,7 @@ impl AgentLoop for DefaultAgentLoop {
                             tool_names.join(", ")
                         )
                     };
-                    self.push_step(&mut steps, &state.phase, "continue", detail);
+                    self.push_step(on_step.as_ref(), &mut steps, &state.phase, "continue", detail);
 
                     state.phase = next_phase;
                     state.budget.tool_calls += tool_calls_made;
@@ -414,6 +470,7 @@ impl AgentLoop for DefaultAgentLoop {
                         "Retrying agent loop"
                     );
                     self.push_step(
+                        on_step.as_ref(),
                         &mut steps,
                         &state.phase,
                         "retry",
@@ -427,6 +484,7 @@ impl AgentLoop for DefaultAgentLoop {
                     if state.budget.retries > self.max_retries() {
                         let content = format!("LLM error: {reason}");
                         self.push_step(
+                            on_step.as_ref(),
                             &mut steps,
                             &state.phase,
                             "failed",
@@ -462,6 +520,7 @@ impl AgentLoop for DefaultAgentLoop {
                     tracing::info!("Agent loop finalized successfully");
                     state.phase = LoopPhase::Finalize;
                     self.push_step(
+                        on_step.as_ref(),
                         &mut steps,
                         &state.phase,
                         "final",

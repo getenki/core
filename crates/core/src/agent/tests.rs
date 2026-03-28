@@ -406,3 +406,60 @@ async fn executes_function_tools_from_native_stringified_arguments() {
     assert_eq!(calls[1][3].content, "echo:hello");
     assert_eq!(calls[1][3].tool_call_id.as_deref(), Some("call-1"));
 }
+
+#[tokio::test]
+async fn detailed_run_traces_tool_call_minor_steps() {
+    let home = temp_home("trace-tool-steps");
+    let llm = RecordingLlm::new(vec![
+        LlmResponse {
+            content: String::new(),
+            usage: None,
+            tool_calls: vec![
+                json!({
+                    "id": "call-1",
+                    "function": {
+                        "name": "echo",
+                        "arguments": "{\"value\":\"hello\"}"
+                    }
+                })
+                .to_string(),
+            ],
+            model: "recording".to_string(),
+            finish_reason: Some("tool_calls".to_string()),
+        },
+        LlmResponse {
+            content: "done".to_string(),
+            usage: None,
+            tool_calls: Vec::new(),
+            model: "recording".to_string(),
+            finish_reason: Some("stop".to_string()),
+        },
+    ]);
+
+    let tool_registry = ToolRegistryBuilder::new().register(EchoTool).build();
+
+    let agent = Agent::with_definition_tool_registry_executor_llm_and_workspace(
+        AgentDefinition::default(),
+        tool_registry,
+        Box::new(crate::tooling::tool_calling::RegistryToolExecutor),
+        Some(Box::new(llm)),
+        None,
+        Some(home),
+    )
+    .await
+    .unwrap();
+
+    let result = agent.run_detailed("session-a", "hello", None).await;
+
+    assert_eq!(result.content, "done");
+    assert!(result.steps.iter().any(|step| {
+        step.kind == "tool_call"
+            && step.detail.contains("echo")
+            && step.detail.contains("{\"value\":\"hello\"}")
+    }));
+    assert!(result.steps.iter().any(|step| {
+        step.kind == "tool_result"
+            && step.detail.contains("echo")
+            && step.detail.contains("echo:hello")
+    }));
+}

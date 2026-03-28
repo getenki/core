@@ -56,6 +56,7 @@ pub async fn run_python_agent(
     agent_id: &str,
     session_id: &str,
     message: &str,
+    stream: bool,
 ) -> Result<String, String> {
     let args = python_runner_args(
         manifest,
@@ -73,7 +74,7 @@ pub async fn run_python_agent(
         let mut candidate_args = candidate.prefix_args.clone();
         candidate_args.extend(args.iter().cloned());
 
-        match spawn_python(project_dir, &candidate.program, &candidate_args).await {
+        match spawn_python(project_dir, &candidate.program, &candidate_args, stream).await {
             Ok(result) => {
                 output = Some(result);
                 break;
@@ -95,20 +96,7 @@ pub async fn run_python_agent(
         }
     };
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let details = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("exit status {:?}", output.status.code())
-        };
-        return Err(format!("Python runtime failed: {details}"));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(output)
 }
 
 pub async fn run_script_agent(
@@ -116,6 +104,7 @@ pub async fn run_script_agent(
     script_path: &str,
     session_id: &str,
     message: &str,
+    stream: bool,
 ) -> Result<String, String> {
     let mut last_not_found: Option<io::Error> = None;
     let mut output = None;
@@ -130,7 +119,7 @@ pub async fn run_script_agent(
         let mut candidate_args = candidate.prefix_args.clone();
         candidate_args.extend(args.iter().cloned());
 
-        match spawn_python(project_dir, &candidate.program, &candidate_args).await {
+        match spawn_python(project_dir, &candidate.program, &candidate_args, stream).await {
             Ok(result) => {
                 output = Some(result);
                 break;
@@ -152,20 +141,7 @@ pub async fn run_script_agent(
         }
     };
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let details = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("exit status {:?}", output.status.code())
-        };
-        return Err(format!("Python runtime failed: {details}"));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(output)
 }
 
 fn python_runner_args(
@@ -258,10 +234,40 @@ async fn spawn_python(
     project_dir: &Path,
     program: &str,
     args: &[String],
-) -> Result<std::process::Output, io::Error> {
-    build_python_command(project_dir, program, args)
-        .output()
-        .await
+    stream: bool,
+) -> Result<String, io::Error> {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use std::io::Write;
+
+    let mut command = build_python_command(project_dir, program, args);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let mut child = command.spawn()?;
+
+    let stdout = child.stdout.take().unwrap();
+    let mut reader = BufReader::new(stdout);
+    let mut output = String::new();
+    let mut line = String::new();
+
+    while reader.read_line(&mut line).await? > 0 {
+        if stream {
+            print!("{}", line);
+            std::io::stdout().flush().unwrap_or(());
+        }
+        output.push_str(&line);
+        line.clear();
+    }
+
+    let status = child.wait().await?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Python failed with exit status: {}", status),
+        ));
+    }
+
+    Ok(output.trim().to_string())
 }
 
 fn build_python_command(project_dir: &Path, program: &str, args: &[String]) -> Command {
@@ -379,7 +385,7 @@ tools = ["assistant-tools"]
 
         assert_eq!(args[2], "demo");
         assert_eq!(
-            args.last().unwrap(),
+            args[args.len() - 2],
             "python\u{1e}src/tools/assistant.py\u{1e}project_runtime_info"
         );
     }

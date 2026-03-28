@@ -54,6 +54,10 @@ callback interface EnkiLlmHandler {
   string complete(string model, string messages_json, string tools_json);
 };
 
+callback interface EnkiStepHandler {
+  void on_step(EnkiExecutionStep step);
+};
+
 interface EnkiAgent {
   [Name=new]
   constructor(
@@ -152,4 +156,7 @@ interface EnkiAgent {
 
   [Async]
   EnkiAgentRunResult run_with_trace(string session_id, string user_message);
+
+  [Async]
+  EnkiAgentRunResult run_with_events(string session_id, string user_message, EnkiStepHandler handler);
 };

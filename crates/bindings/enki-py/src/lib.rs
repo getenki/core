@@ -97,6 +97,10 @@ pub trait EnkiLlmHandler: Send + Sync {
     fn complete(&self, model: String, messages_json: String, tools_json: String) -> String;
 }
 
+pub trait EnkiStepHandler: Send + Sync {
+    fn on_step(&self, step: EnkiExecutionStep);
+}
+
 struct PythonTool {
     name: String,
     description: String,
@@ -342,6 +346,7 @@ impl LlmProvider for PythonLlmProvider {
 struct RunRequest {
     session_id: String,
     user_message: String,
+    on_step: Option<std::sync::Arc<dyn Fn(CoreExecutionStep) + Send + Sync>>,
     reply_tx: tokio::sync::oneshot::Sender<CoreAgentRunResult>,
 }
 
@@ -592,7 +597,7 @@ impl EnkiAgent {
 
             for request in request_rx {
                 let response =
-                    runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message));
+                    runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message, request.on_step));
                 let _ = request.reply_tx.send(response);
             }
         });
@@ -710,7 +715,7 @@ impl EnkiAgent {
 
             for request in request_rx {
                 let response =
-                    runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message));
+                    runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message, request.on_step));
                 let _ = request.reply_tx.send(response);
             }
         });
@@ -733,6 +738,53 @@ impl EnkiAgent {
         let request = RunRequest {
             session_id,
             user_message,
+            on_step: None,
+            reply_tx,
+        };
+
+        let send_result = self
+            .request_tx
+            .lock()
+            .map_err(|_| "Worker error: request mutex poisoned".to_string())
+            .and_then(|sender| {
+                sender
+                    .send(request)
+                    .map_err(|_| "Worker error: agent worker has stopped".to_string())
+            });
+
+        if let Err(message) = send_result {
+            return EnkiAgentRunResult {
+                output: message,
+                steps: Vec::new(),
+            };
+        }
+
+        reply_rx
+            .await
+            .map(EnkiAgentRunResult::from)
+            .unwrap_or_else(|_| EnkiAgentRunResult {
+                output: "Worker error: agent worker dropped reply channel".to_string(),
+                steps: Vec::new(),
+            })
+    }
+
+    pub async fn run_with_events(
+        &self,
+        session_id: String,
+        user_message: String,
+        handler: Box<dyn EnkiStepHandler>,
+    ) -> EnkiAgentRunResult {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        
+        let handler_arc: Arc<dyn EnkiStepHandler> = handler.into();
+        let step_closure = Arc::new(move |step: CoreExecutionStep| {
+            handler_arc.on_step(step.into());
+        });
+
+        let request = RunRequest {
+            session_id,
+            user_message,
+            on_step: Some(step_closure),
             reply_tx,
         };
 

@@ -32,6 +32,7 @@ pub async fn run(args: TestArgs) -> Result<(), String> {
                 &agent_cfg.id,
                 "test-session",
                 "Respond with OK",
+                false,
             )
             .await
             {

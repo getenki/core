@@ -43,17 +43,17 @@ pub async fn run(args: RunArgs) -> Result<(), String> {
         println!();
 
         if project_runtime::is_python_project(project_dir) {
-            let response = project_runtime::run_python_agent(
+            let _ = project_runtime::run_python_agent(
                 &manifest,
                 project_dir,
                 &workspace_home,
                 &agent_cfg.id,
                 "cli-session",
                 &args.message,
+                true,
             )
             .await?;
 
-            println!("\x1b[1;33m{}:\x1b[0m {}", agent_cfg.name, response);
             println!();
             return Ok(());
         }
@@ -73,7 +73,7 @@ pub async fn run(args: RunArgs) -> Result<(), String> {
 
         let runtime = builder.build().await?;
         let result = runtime
-            .process_detailed(agent_id, "cli-session", &args.message)
+            .process_detailed(agent_id, "cli-session", &args.message, None)
             .await?;
 
         print_execution_steps(&result.steps);
@@ -88,17 +88,17 @@ pub async fn run(args: RunArgs) -> Result<(), String> {
             println!("  \x1b[2mMessage:\x1b[0m {}", args.message);
             println!();
 
-            let response = project_runtime::run_python_agent(
+            let _ = project_runtime::run_python_agent(
                 &manifest,
                 project_dir,
                 &workspace_home,
                 &first_agent.id,
                 "cli-session",
                 &args.message,
+                true,
             )
             .await?;
 
-            println!("\x1b[1;33m{}:\x1b[0m {}", first_agent.name, response);
             println!();
             return Ok(());
         }
@@ -131,7 +131,7 @@ pub async fn run(args: RunArgs) -> Result<(), String> {
         println!();
 
         let result = runtime
-            .process_detailed(&first_agent.id, "cli-session", &args.message)
+            .process_detailed(&first_agent.id, "cli-session", &args.message, None)
             .await?;
 
         print_execution_steps(&result.steps);

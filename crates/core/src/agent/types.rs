@@ -35,9 +35,18 @@ pub struct AgentRunResult {
     pub steps: Vec<ExecutionStep>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolCallTrace {
+    pub name: String,
+    pub args: Value,
+    pub call_id: Option<String>,
+    pub result: String,
+}
+
 pub enum StepOutcome {
     Continue {
         tool_names: Vec<String>,
+        tool_traces: Vec<ToolCallTrace>,
     },
     Final(String),
 }

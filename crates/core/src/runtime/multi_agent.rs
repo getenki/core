@@ -36,7 +36,7 @@ impl MultiAgentRuntime {
         session_id: &str,
         message: &str,
     ) -> Result<String, String> {
-        Ok(self.process_detailed(agent_id, session_id, message).await?.content)
+        Ok(self.process_detailed(agent_id, session_id, message, None).await?.content)
     }
 
     pub async fn process_detailed(
@@ -44,13 +44,14 @@ impl MultiAgentRuntime {
         agent_id: &str,
         session_id: &str,
         message: &str,
+        on_step: Option<std::sync::Arc<dyn Fn(crate::agent::types::ExecutionStep) + Send + Sync>>,
     ) -> Result<AgentRunResult, String> {
         let agent = self
             .agents
             .get(agent_id)
             .ok_or_else(|| format!("Agent '{agent_id}' not found in runtime."))?;
 
-        Ok(agent.run_detailed(session_id, message).await)
+        Ok(agent.run_detailed(session_id, message, on_step).await)
     }
 
     pub fn registry(&self) -> &Arc<AgentRegistry> {

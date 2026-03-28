@@ -118,7 +118,7 @@ impl RuntimeHandler for AgentRuntimeHandler {
         if request.channel_id == "cli" {
             let result = self
                 .agent
-                .run_detailed(&request.session_id, &request.content)
+                .run_detailed(&request.session_id, &request.content, None)
                 .await;
             let mut output = String::new();
             if !result.steps.is_empty() {
