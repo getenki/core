@@ -1,5 +1,6 @@
 use crate::runtime::{
-    InputChannel, RuntimeHandler, RuntimeRequest, RuntimeResponse, SessionContext,
+    InputChannel, RuntimeDetailedResponse, RuntimeHandler, RuntimeRequest, RuntimeResponse,
+    SessionContext,
 };
 use std::collections::HashMap;
 use std::sync::{
@@ -87,19 +88,32 @@ where
     }
 
     pub async fn process(&self, request: RuntimeRequest) -> Result<RuntimeResponse, String> {
+        Ok(self.process_detailed(request, None).await?.response)
+    }
+
+    pub async fn process_detailed(
+        &self,
+        request: RuntimeRequest,
+        on_step: Option<std::sync::Arc<dyn Fn(crate::agent::ExecutionStep) + Send + Sync>>,
+    ) -> Result<RuntimeDetailedResponse, String> {
         let lease = self
             .coordinator
             .acquire(&request.session_id, &request.channel_id)
             .await?;
-        let content = self.handler.handle(&request, &lease.context).await?;
+        let (content, steps) = self
+            .handler
+            .handle_detailed(&request, &lease.context, on_step)
+            .await?;
 
-        Ok(RuntimeResponse {
+        let response = RuntimeResponse {
             request_id: request.request_id,
             session_id: lease.context.session_id.clone(),
             channel_id: lease.context.channel_id.clone(),
             sequence: lease.context.sequence,
             content,
-        })
+        };
+
+        Ok(RuntimeDetailedResponse { response, steps })
     }
 
     pub async fn serve_channel<C>(&self, channel: &mut C) -> Result<(), String>

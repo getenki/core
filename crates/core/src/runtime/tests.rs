@@ -1,7 +1,9 @@
+use crate::agent::ExecutionStep;
 use crate::runtime::{Runtime, RuntimeHandler, RuntimeRequest, SessionContext};
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex as StdMutex;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
 
@@ -97,4 +99,58 @@ async fn allows_parallel_work_across_different_sessions() {
     second.unwrap();
 
     assert!(peak.load(Ordering::SeqCst) >= 2);
+}
+
+struct DetailedHandler;
+
+#[async_trait(?Send)]
+impl RuntimeHandler for DetailedHandler {
+    async fn handle(
+        &self,
+        request: &RuntimeRequest,
+        _session: &SessionContext,
+    ) -> Result<String, String> {
+        Ok(format!("plain:{}", request.content))
+    }
+
+    async fn handle_detailed(
+        &self,
+        request: &RuntimeRequest,
+        session: &SessionContext,
+        on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
+    ) -> Result<(String, Vec<ExecutionStep>), String> {
+        let step = ExecutionStep {
+            index: 1,
+            phase: "Act".to_string(),
+            kind: "trace".to_string(),
+            detail: format!("{}:{}", request.content, session.sequence),
+        };
+        if let Some(on_step) = on_step {
+            on_step(step.clone());
+        }
+        Ok((format!("detailed:{}", request.content), vec![step]))
+    }
+}
+
+#[tokio::test]
+async fn process_detailed_routes_trace_through_runtime_handler() {
+    let runtime = Runtime::new(DetailedHandler);
+    let seen = Arc::new(StdMutex::new(Vec::new()));
+    let seen_clone = Arc::clone(&seen);
+    let on_step = Arc::new(move |step: ExecutionStep| {
+        seen_clone.lock().unwrap().push(step.detail);
+    });
+
+    let result = runtime
+        .process_detailed(
+            RuntimeRequest::new("session-a", "cli", "hello"),
+            Some(on_step),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.response.content, "detailed:hello");
+    assert_eq!(result.steps.len(), 1);
+    assert_eq!(result.steps[0].detail, "hello:1");
+    assert_eq!(seen.lock().unwrap().as_slice(), ["hello:1"]);
 }

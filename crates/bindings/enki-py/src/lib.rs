@@ -9,6 +9,7 @@ use core_next::llm::{
 use core_next::memory::{
     MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
 };
+use core_next::runtime::{Runtime, RuntimeHandler, RuntimeRequest, SessionContext};
 use core_next::tooling::tool_calling::RegistryToolExecutor;
 use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
 use futures::stream;
@@ -122,6 +123,10 @@ struct PythonLlmProvider {
     handler: Arc<dyn EnkiLlmHandler>,
 }
 
+struct BindingAgentRuntimeHandler {
+    agent: Agent,
+}
+
 #[async_trait(?Send)]
 impl Tool for PythonTool {
     fn name(&self) -> &str {
@@ -233,6 +238,30 @@ impl MemoryRouter for PythonMemoryRouter {
             active_providers: self.provider_names.clone(),
             max_context_entries: 6,
         }
+    }
+}
+
+#[async_trait(?Send)]
+impl RuntimeHandler for BindingAgentRuntimeHandler {
+    async fn handle(
+        &self,
+        request: &RuntimeRequest,
+        _session: &SessionContext,
+    ) -> Result<String, String> {
+        Ok(self.agent.run(&request.session_id, &request.content).await)
+    }
+
+    async fn handle_detailed(
+        &self,
+        request: &RuntimeRequest,
+        _session: &SessionContext,
+        on_step: Option<std::sync::Arc<dyn Fn(CoreExecutionStep) + Send + Sync>>,
+    ) -> Result<(String, Vec<CoreExecutionStep>), String> {
+        let result = self
+            .agent
+            .run_detailed(&request.session_id, &request.content, on_step)
+            .await;
+        Ok((result.content, result.steps))
     }
 }
 
@@ -594,10 +623,19 @@ impl EnkiAgent {
                         return;
                     }
                 };
+            let runtime_instance = Runtime::new(BindingAgentRuntimeHandler { agent });
 
             for request in request_rx {
-                let response =
-                    runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message, request.on_step));
+                let response = match runtime.block_on(runtime_instance.process_detailed(
+                    RuntimeRequest::new(&request.session_id, "binding-py", &request.user_message),
+                    request.on_step,
+                )) {
+                    Ok(result) => CoreAgentRunResult {
+                        content: result.response.content,
+                        steps: result.steps,
+                    },
+                    Err(error) => error_run_result(error),
+                };
                 let _ = request.reply_tx.send(response);
             }
         });
@@ -712,10 +750,19 @@ impl EnkiAgent {
                     return;
                 }
             };
+            let runtime_instance = Runtime::new(BindingAgentRuntimeHandler { agent });
 
             for request in request_rx {
-                let response =
-                    runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message, request.on_step));
+                let response = match runtime.block_on(runtime_instance.process_detailed(
+                    RuntimeRequest::new(&request.session_id, "binding-py", &request.user_message),
+                    request.on_step,
+                )) {
+                    Ok(result) => CoreAgentRunResult {
+                        content: result.response.content,
+                        steps: result.steps,
+                    },
+                    Err(error) => error_run_result(error),
+                };
                 let _ = request.reply_tx.send(response);
             }
         });

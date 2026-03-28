@@ -8,7 +8,10 @@ pub use builder::RuntimeBuilder;
 pub use channels::CliChannel;
 pub use core::Runtime;
 pub use multi_agent::{MultiAgentRuntime, MultiAgentRuntimeBuilder};
-pub use types::{InputChannel, RuntimeHandler, RuntimeRequest, RuntimeResponse, SessionContext};
+pub use types::{
+    InputChannel, RuntimeDetailedResponse, RuntimeHandler, RuntimeRequest, RuntimeResponse,
+    SessionContext,
+};
 
 #[cfg(test)]
 mod tests;

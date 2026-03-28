@@ -9,7 +9,9 @@ use core_next::memory::{
   MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
 };
 use core_next::registry::{AgentCard, AgentStatus, DiscoverQuery};
-use core_next::runtime::MultiAgentRuntime;
+use core_next::runtime::{
+  MultiAgentRuntime, Runtime, RuntimeHandler, RuntimeRequest, SessionContext,
+};
 use core_next::tooling::tool_calling::RegistryToolExecutor;
 use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
 use napi::bindgen_prelude::{AsyncTask, FnArgs, Function, JsObjectValue, Object, Unknown};
@@ -133,6 +135,10 @@ struct JsMemoryProvider {
 
 struct JsMemoryRouter {
   provider_names: Vec<String>,
+}
+
+struct BindingAgentRuntimeHandler {
+  agent: CoreAgent,
 }
 
 struct JsMemoryHandlers {
@@ -418,6 +424,30 @@ impl MemoryRouter for JsMemoryRouter {
       active_providers: self.provider_names.clone(),
       max_context_entries: 6,
     }
+  }
+}
+
+#[async_trait(?Send)]
+impl RuntimeHandler for BindingAgentRuntimeHandler {
+  async fn handle(
+    &self,
+    request: &RuntimeRequest,
+    _session: &SessionContext,
+  ) -> Result<String, String> {
+    Ok(self.agent.run(&request.session_id, &request.content).await)
+  }
+
+  async fn handle_detailed(
+    &self,
+    request: &RuntimeRequest,
+    _session: &SessionContext,
+    on_step: Option<std::sync::Arc<dyn Fn(CoreExecutionStep) + Send + Sync>>,
+  ) -> Result<(String, Vec<CoreExecutionStep>), String> {
+    let result = self
+      .agent
+      .run_detailed(&request.session_id, &request.content, on_step)
+      .await;
+    Ok((result.content, result.steps))
   }
 }
 
@@ -1158,12 +1188,22 @@ fn spawn_agent_worker(
         return;
       }
     };
+    let runtime_instance = Runtime::new(BindingAgentRuntimeHandler { agent });
 
     let _ = ready_tx.send(Ok(()));
 
     for request in request_rx {
-      let response =
-        runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message, None));
+      let result = runtime.block_on(runtime_instance.process_detailed(
+        RuntimeRequest::new(&request.session_id, "binding-js", &request.user_message),
+        None,
+      ));
+      let response = match result {
+        Ok(result) => CoreAgentRunResult {
+          content: result.response.content,
+          steps: result.steps,
+        },
+        Err(error) => error_run_result(error),
+      };
       let _ = request.reply_tx.send(response);
     }
   });

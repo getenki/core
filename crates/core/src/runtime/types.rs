@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::agent::ExecutionStep;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRequest {
     pub request_id: String,
@@ -47,6 +49,12 @@ pub struct RuntimeResponse {
     pub content: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeDetailedResponse {
+    pub response: RuntimeResponse,
+    pub steps: Vec<ExecutionStep>,
+}
+
 #[async_trait(?Send)]
 pub trait RuntimeHandler {
     async fn handle(
@@ -54,6 +62,15 @@ pub trait RuntimeHandler {
         request: &RuntimeRequest,
         session: &SessionContext,
     ) -> Result<String, String>;
+
+    async fn handle_detailed(
+        &self,
+        request: &RuntimeRequest,
+        session: &SessionContext,
+        _on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
+    ) -> Result<(String, Vec<ExecutionStep>), String> {
+        Ok((self.handle(request, session).await?, Vec::new()))
+    }
 }
 
 #[async_trait(?Send)]

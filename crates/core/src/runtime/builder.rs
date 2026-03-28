@@ -138,6 +138,37 @@ impl RuntimeHandler for AgentRuntimeHandler {
 
         Ok(self.agent.run(&request.session_id, &request.content).await)
     }
+
+    async fn handle_detailed(
+        &self,
+        request: &RuntimeRequest,
+        _session: &SessionContext,
+        on_step: Option<std::sync::Arc<dyn Fn(crate::agent::ExecutionStep) + Send + Sync>>,
+    ) -> Result<(String, Vec<crate::agent::ExecutionStep>), String> {
+        let result = self
+            .agent
+            .run_detailed(&request.session_id, &request.content, on_step)
+            .await;
+
+        if request.channel_id == "cli" {
+            let mut output = String::new();
+            if !result.steps.is_empty() {
+                output.push_str("Execution steps:\n");
+                for step in &result.steps {
+                    output.push_str(&format!(
+                        "{}. [{}] {}: {}\n",
+                        step.index, step.phase, step.kind, step.detail
+                    ));
+                }
+                output.push('\n');
+            }
+            output.push_str("Final response:\n");
+            output.push_str(&result.content);
+            return Ok((output, result.steps));
+        }
+
+        Ok((result.content, result.steps))
+    }
 }
 
 #[cfg(test)]
