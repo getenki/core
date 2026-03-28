@@ -175,6 +175,7 @@ mod tests {
             workspace_dir: PathBuf::from("workspace"),
             sessions_dir: PathBuf::from("sessions"),
             delegation,
+            human: None,
         }
     }
 

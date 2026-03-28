@@ -24,13 +24,37 @@ impl CliChannel {
 #[async_trait(?Send)]
 impl InputChannel for CliChannel {
     async fn recv(&mut self) -> Option<RuntimeRequest> {
-        self.pending.take()
+        // If we have a pending initial request, return it.
+        if let Some(req) = self.pending.take() {
+            return Some(req);
+        }
+        // Otherwise, we're done (single-shot CLI).
+        None
     }
 
     async fn send(&mut self, event: RuntimeEvent) -> Result<(), String> {
         match event {
             RuntimeEvent::Step { step, .. } => {
                 println!("{}. [{}] {}: {}", step.index, step.phase, step.kind, step.detail);
+            }
+            RuntimeEvent::HumanRequest { query, .. } => {
+                // Print the question and read from stdin.
+                println!("\n🧑 Agent is asking for your input:");
+                println!("   {query}");
+                print!("> ");
+
+                // Flush stdout so the prompt appears before reading.
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+
+                let mut reply = String::new();
+                std::io::stdin()
+                    .read_line(&mut reply)
+                    .map_err(|e| format!("Failed to read stdin: {e}"))?;
+                let reply = reply.trim().to_string();
+
+                // Queue the reply so the next recv() returns it.
+                self.pending = Some(RuntimeRequest::new("human-reply", "cli", reply));
             }
             RuntimeEvent::Final(response) => {
                 println!("{}", response.content);

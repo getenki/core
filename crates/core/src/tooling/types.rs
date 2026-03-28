@@ -6,6 +6,13 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Async function that the runtime provides for asking a human user a question.
+/// The implementation suspends the calling task until the human replies.
+#[async_trait(?Send)]
+pub trait AskHumanFn: 'static {
+    async fn ask(&self, query: &str) -> Result<String, String>;
+}
+
 pub type ToolRegistry = BTreeMap<String, Box<dyn Tool>>;
 
 #[derive(Clone)]
@@ -14,6 +21,7 @@ pub struct ToolContext {
     pub workspace_dir: PathBuf,
     pub sessions_dir: PathBuf,
     pub delegation: Option<DelegationContext>,
+    pub human: Option<Arc<dyn AskHumanFn>>,
 }
 
 /// Provides delegation capabilities to tools in a multi-agent runtime.
@@ -156,6 +164,7 @@ mod tests {
             workspace_dir: PathBuf::from("workspace"),
             sessions_dir: PathBuf::from("sessions"),
             delegation: None,
+            human: None,
         }
     }
 

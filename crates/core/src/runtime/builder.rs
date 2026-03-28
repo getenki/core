@@ -83,10 +83,17 @@ impl RuntimeBuilder {
             definition,
             llm,
             memory,
-            tool_registry,
+            mut tool_registry,
             tool_executor,
             workspace_home,
         } = self;
+
+        // Inject the ask_human intrinsic tool so agents can pause for human input.
+        use crate::tooling::human_tools::AskHumanTool;
+        tool_registry.insert(
+            "ask_human".to_string(),
+            Box::new(AskHumanTool) as Box<dyn Tool>,
+        );
 
         let tool_executor = tool_executor
             .unwrap_or_else(|| Box::new(crate::tooling::tool_calling::RegistryToolExecutor));
@@ -148,6 +155,43 @@ impl RuntimeHandler for AgentRuntimeHandler {
         let result = self
             .agent
             .run_detailed(&request.session_id, &request.content, on_step)
+            .await;
+
+        if request.channel_id == "cli" {
+            let mut output = String::new();
+            if !result.steps.is_empty() {
+                output.push_str("Execution steps:\n");
+                for step in &result.steps {
+                    output.push_str(&format!(
+                        "{}. [{}] {}: {}\n",
+                        step.index, step.phase, step.kind, step.detail
+                    ));
+                }
+                output.push('\n');
+            }
+            output.push_str("Final response:\n");
+            output.push_str(&result.content);
+            return Ok((output, result.steps));
+        }
+
+        Ok((result.content, result.steps))
+    }
+
+    async fn handle_detailed_with_human(
+        &self,
+        request: &RuntimeRequest,
+        _session: &SessionContext,
+        on_step: Option<std::sync::Arc<dyn Fn(crate::agent::ExecutionStep) + Send + Sync>>,
+        human: Option<std::sync::Arc<dyn crate::tooling::types::AskHumanFn>>,
+    ) -> Result<(String, Vec<crate::agent::ExecutionStep>), String> {
+        let result = self
+            .agent
+            .run_detailed_with_human(
+                &request.session_id,
+                &request.content,
+                on_step,
+                human,
+            )
             .await;
 
         if request.channel_id == "cli" {
@@ -322,7 +366,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.content, "ok");
+        // The cli handler wraps output with execution step listing.
+        assert!(response.content.contains("Final response:"));
+        assert!(response.content.contains("ok"));
 
         let requested_tools = llm.requested_tools();
         assert_eq!(requested_tools.len(), 1);
@@ -330,6 +376,11 @@ mod tests {
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(tool_names, vec!["echo", "exec", "read_file", "write_file"]);
+        // ask_human is now injected as an intrinsic tool
+        assert!(tool_names.contains(&"ask_human"));
+        assert!(tool_names.contains(&"echo"));
+        assert!(tool_names.contains(&"exec"));
+        assert!(tool_names.contains(&"read_file"));
+        assert!(tool_names.contains(&"write_file"));
     }
 }

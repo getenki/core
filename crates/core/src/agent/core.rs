@@ -670,4 +670,16 @@ Current task workspace: {}
             .run_detailed(self, session_id, user_message, on_step)
             .await
     }
+
+    pub async fn run_detailed_with_human(
+        &self,
+        session_id: &str,
+        user_message: &str,
+        on_step: Option<std::sync::Arc<dyn Fn(crate::agent::types::ExecutionStep) + Send + Sync>>,
+        human: Option<std::sync::Arc<dyn crate::tooling::types::AskHumanFn>>,
+    ) -> AgentRunResult {
+        self.agent_loop
+            .run_detailed_with_human(self, session_id, user_message, on_step, human)
+            .await
+    }
 }

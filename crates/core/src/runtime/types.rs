@@ -64,6 +64,13 @@ pub enum RuntimeEvent {
         sequence: u64,
         step: ExecutionStep,
     },
+    /// The agent is paused and waiting for a human reply.
+    HumanRequest {
+        request_id: String,
+        session_id: String,
+        channel_id: String,
+        query: String,
+    },
     Final(RuntimeResponse),
 }
 
@@ -82,6 +89,19 @@ pub trait RuntimeHandler {
         _on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
     ) -> Result<(String, Vec<ExecutionStep>), String> {
         Ok((self.handle(request, session).await?, Vec::new()))
+    }
+
+    /// Like `handle_detailed`, but also accepts an optional `AskHumanFn` to
+    /// inject into the agent's tool context for human-in-the-loop support.
+    async fn handle_detailed_with_human(
+        &self,
+        request: &RuntimeRequest,
+        session: &SessionContext,
+        on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
+        _human: Option<std::sync::Arc<dyn crate::tooling::types::AskHumanFn>>,
+    ) -> Result<(String, Vec<ExecutionStep>), String> {
+        // Default: ignore the human context and delegate to handle_detailed.
+        self.handle_detailed(request, session, on_step).await
     }
 }
 

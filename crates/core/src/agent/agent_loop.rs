@@ -5,7 +5,8 @@ use serde_json::Value;
 use crate::agent::core::Agent;
 use crate::agent::types::{AgentRunResult, ExecutionStep, StepOutcome, ToolCallTrace};
 use crate::message::{Message, next_request_id};
-use crate::tooling::types::ToolContext;
+use crate::tooling::types::{AskHumanFn, ToolContext};
+use std::sync::Arc;
 
 #[async_trait(?Send)]
 pub trait AgentLoop {
@@ -16,6 +17,21 @@ pub trait AgentLoop {
         user_message: &str,
         on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
     ) -> AgentRunResult;
+
+    /// Like `run_detailed`, but also injects an `AskHumanFn` into the
+    /// tool context so tools can pause for human input.
+    async fn run_detailed_with_human(
+        &self,
+        agent: &Agent,
+        session_id: &str,
+        user_message: &str,
+        on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
+        _human: Option<Arc<dyn AskHumanFn>>,
+    ) -> AgentRunResult {
+        // Default: ignore human context.
+        self.run_detailed(agent, session_id, user_message, on_step)
+            .await
+    }
 
     async fn run(&self, agent: &Agent, session_id: &str, user_message: &str) -> String {
         self.run_detailed(agent, session_id, user_message, None)
@@ -321,7 +337,20 @@ impl AgentLoop for DefaultAgentLoop {
         user_message: &str,
         on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
     ) -> AgentRunResult {
+        self.run_detailed_with_human(agent, session_id, user_message, on_step, None)
+            .await
+    }
+
+    async fn run_detailed_with_human(
+        &self,
+        agent: &Agent,
+        session_id: &str,
+        user_message: &str,
+        on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
+        human: Option<Arc<dyn AskHumanFn>>,
+    ) -> AgentRunResult {
         let mut ctx = agent.workspace.tool_context(session_id);
+        ctx.human = human;
         let mut steps = Vec::new();
 
         let mut messages = match self
