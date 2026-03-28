@@ -8,16 +8,16 @@ use cli::{AgentCommand, Cli, Command, ToolCommand};
 
 #[tokio::main]
 async fn main() {
+    let cli = Cli::parse();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&cli.log_level)),
         )
         .init();
 
     print_logo();
-
-    let cli = Cli::parse();
 
     let result = match cli.command {
         Command::Init(args) => commands::init::run(args),

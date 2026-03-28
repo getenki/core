@@ -198,6 +198,11 @@ def main() -> None:
 
     runtime = MultiAgentRuntime(members)
     result = runtime.process_sync(agent_id, message, session_id=session_id)
+    if result.steps:
+        print("Execution steps:")
+        for step in result.steps:
+            print(f"{step.index}. [{step.phase}] {step.kind}: {step.detail}")
+        print()
     print(result.output)
 
 

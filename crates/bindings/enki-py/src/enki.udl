@@ -1,10 +1,23 @@
 namespace enki {
+  void init_logger(string level);
 };
 
 dictionary EnkiTool {
   string name;
   string description;
   string parameters_json;
+};
+
+dictionary EnkiExecutionStep {
+  u64 index;
+  string phase;
+  string kind;
+  string detail;
+};
+
+dictionary EnkiAgentRunResult {
+  string output;
+  sequence<EnkiExecutionStep> steps;
 };
 
 enum EnkiMemoryKind {
@@ -136,4 +149,7 @@ interface EnkiAgent {
 
   [Async]
   string run(string session_id, string user_message);
+
+  [Async]
+  EnkiAgentRunResult run_with_trace(string session_id, string user_message);
 };

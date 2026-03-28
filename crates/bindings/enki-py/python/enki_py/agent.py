@@ -82,8 +82,17 @@ class RunContext(Generic[DepsT]):
 
 
 @dataclass(frozen=True)
+class ExecutionStep:
+    index: int
+    phase: str
+    kind: str
+    detail: str
+
+
+@dataclass(frozen=True)
 class AgentRunResult:
     output: str
+    steps: list[ExecutionStep]
 
 
 @dataclass(frozen=True)
@@ -857,10 +866,24 @@ class Agent(Generic[DepsT]):
         _try_set_uniffi_event_loop()
         self._handler.set_deps(deps)
         try:
-            output = await backend.run(session_id, user_message)
+            if hasattr(backend, "run_with_trace"):
+                raw_result = await backend.run_with_trace(session_id, user_message)
+                output = raw_result.output
+                steps = [
+                    ExecutionStep(
+                        index=step.index,
+                        phase=step.phase,
+                        kind=step.kind,
+                        detail=step.detail,
+                    )
+                    for step in getattr(raw_result, "steps", [])
+                ]
+            else:
+                output = await backend.run(session_id, user_message)
+                steps = []
         finally:
             self._handler.clear_deps()
-        return AgentRunResult(output=output)
+        return AgentRunResult(output=output, steps=steps)
 
     def run_sync(
             self,
@@ -1015,6 +1038,7 @@ __all__ = [
     "AgentCard",
     "Agent",
     "AgentRunResult",
+    "ExecutionStep",
     "LlmProviderBackend",
     "MemoryBackend",
     "MemoryEntry",

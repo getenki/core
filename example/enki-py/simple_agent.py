@@ -14,6 +14,10 @@ def main() -> None:
         "Explain what this Enki Python example demonstrates.",
         session_id=f"simple-agent-anthropic-{uuid.uuid4()}",
     )
+    print("Execution steps:")
+    for step in result.steps:
+        print(f"{step.index}. [{step.phase}] {step.kind}: {step.detail}")
+    print()
     print(result.output)
 
 

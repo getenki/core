@@ -1,11 +1,14 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
+
+#[cfg(target_arch = "wasm32")]
+use std::collections::HashMap;
+#[cfg(target_arch = "wasm32")]
 use std::sync::Mutex;
 
 use serde_json::Value;
 
 use crate::agent::agent_loop::{AgentLoop, DefaultAgentLoop};
-use crate::agent::types::{AgentDefinition, StepOutcome, ToolInvocation};
+use crate::agent::types::{AgentDefinition, AgentRunResult, StepOutcome, ToolInvocation};
 use crate::agent::workspace::AgentWorkspace;
 #[cfg(all(not(target_arch = "wasm32"), feature = "universal-llm-provider"))]
 use crate::llm::UniversalLLMClient;
@@ -617,11 +620,15 @@ Current task workspace: {}
         let invocations = self.extract_tool_invocations(&assistant_message);
 
         if !invocations.is_empty() {
+            let tool_names = invocations
+                .iter()
+                .map(|invocation| invocation.name.clone())
+                .collect();
             let tool_messages = self
                 .build_tool_result_messages(invocations, ctx, parent_message_id)
                 .await;
             messages.extend(tool_messages);
-            return Ok(StepOutcome::Continue);
+            return Ok(StepOutcome::Continue { tool_names });
         }
 
         let content = assistant_message
@@ -635,5 +642,11 @@ Current task workspace: {}
 
     pub async fn run(&self, session_id: &str, user_message: &str) -> String {
         self.agent_loop.run(self, session_id, user_message).await
+    }
+
+    pub async fn run_detailed(&self, session_id: &str, user_message: &str) -> AgentRunResult {
+        self.agent_loop
+            .run_detailed(self, session_id, user_message)
+            .await
     }
 }

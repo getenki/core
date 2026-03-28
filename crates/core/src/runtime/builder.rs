@@ -115,6 +115,27 @@ impl RuntimeHandler for AgentRuntimeHandler {
         request: &RuntimeRequest,
         _session: &SessionContext,
     ) -> Result<String, String> {
+        if request.channel_id == "cli" {
+            let result = self
+                .agent
+                .run_detailed(&request.session_id, &request.content)
+                .await;
+            let mut output = String::new();
+            if !result.steps.is_empty() {
+                output.push_str("Execution steps:\n");
+                for step in &result.steps {
+                    output.push_str(&format!(
+                        "{}. [{}] {}: {}\n",
+                        step.index, step.phase, step.kind, step.detail
+                    ));
+                }
+                output.push('\n');
+            }
+            output.push_str("Final response:\n");
+            output.push_str(&result.content);
+            return Ok(output);
+        }
+
         Ok(self.agent.run(&request.session_id, &request.content).await)
     }
 }

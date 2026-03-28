@@ -1,5 +1,8 @@
 use async_trait::async_trait;
-use core_next::agent::{Agent, AgentDefinition};
+use core_next::agent::{
+    Agent, AgentDefinition, AgentRunResult as CoreAgentRunResult,
+    ExecutionStep as CoreExecutionStep,
+};
 use core_next::llm::{
     ChatMessage, LlmConfig, LlmProvider, LlmResponse, ResponseStream, ToolDefinition,
 };
@@ -19,6 +22,20 @@ pub struct EnkiTool {
     pub name: String,
     pub description: String,
     pub parameters_json: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnkiExecutionStep {
+    pub index: u64,
+    pub phase: String,
+    pub kind: String,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnkiAgentRunResult {
+    pub output: String,
+    pub steps: Vec<EnkiExecutionStep>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -236,6 +253,13 @@ fn build_memory_manager(
     MemoryManager::new(Box::new(PythonMemoryRouter { provider_names }), providers)
 }
 
+fn error_run_result(message: impl Into<String>) -> CoreAgentRunResult {
+    CoreAgentRunResult {
+        content: message.into(),
+        steps: Vec::new(),
+    }
+}
+
 #[async_trait]
 impl LlmProvider for PythonLlmProvider {
     async fn complete(
@@ -318,7 +342,7 @@ impl LlmProvider for PythonLlmProvider {
 struct RunRequest {
     session_id: String,
     user_message: String,
-    reply_tx: tokio::sync::oneshot::Sender<String>,
+    reply_tx: tokio::sync::oneshot::Sender<CoreAgentRunResult>,
 }
 
 pub struct EnkiAgent {
@@ -543,7 +567,7 @@ impl EnkiAgent {
                     let message =
                         format!("Initialization error: failed to create tokio runtime: {error}");
                     for request in request_rx {
-                        let _ = request.reply_tx.send(message.clone());
+                        let _ = request.reply_tx.send(error_run_result(message.clone()));
                     }
                     return;
                 }
@@ -560,7 +584,7 @@ impl EnkiAgent {
                     Err(error) => {
                         let message = format!("Initialization error: {error}");
                         for request in request_rx {
-                            let _ = request.reply_tx.send(message.clone());
+                            let _ = request.reply_tx.send(error_run_result(message.clone()));
                         }
                         return;
                     }
@@ -568,7 +592,7 @@ impl EnkiAgent {
 
             for request in request_rx {
                 let response =
-                    runtime.block_on(agent.run(&request.session_id, &request.user_message));
+                    runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message));
                 let _ = request.reply_tx.send(response);
             }
         });
@@ -635,7 +659,7 @@ impl EnkiAgent {
                     let message =
                         format!("Initialization error: failed to create tokio runtime: {error}");
                     for request in request_rx {
-                        let _ = request.reply_tx.send(message.clone());
+                        let _ = request.reply_tx.send(error_run_result(message.clone()));
                     }
                     return;
                 }
@@ -647,7 +671,7 @@ impl EnkiAgent {
                     Err(error) => {
                         let message = format!("Initialization error: {error}");
                         for request in request_rx {
-                            let _ = request.reply_tx.send(message.clone());
+                            let _ = request.reply_tx.send(error_run_result(message.clone()));
                         }
                         return;
                     }
@@ -678,7 +702,7 @@ impl EnkiAgent {
                 Err(error) => {
                     let message = format!("Initialization error: {error}");
                     for request in request_rx {
-                        let _ = request.reply_tx.send(message.clone());
+                        let _ = request.reply_tx.send(error_run_result(message.clone()));
                     }
                     return;
                 }
@@ -686,7 +710,7 @@ impl EnkiAgent {
 
             for request in request_rx {
                 let response =
-                    runtime.block_on(agent.run(&request.session_id, &request.user_message));
+                    runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message));
                 let _ = request.reply_tx.send(response);
             }
         });
@@ -697,6 +721,14 @@ impl EnkiAgent {
     }
 
     pub async fn run(&self, session_id: String, user_message: String) -> String {
+        self.run_with_trace(session_id, user_message).await.output
+    }
+
+    pub async fn run_with_trace(
+        &self,
+        session_id: String,
+        user_message: String,
+    ) -> EnkiAgentRunResult {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let request = RunRequest {
             session_id,
@@ -715,12 +747,19 @@ impl EnkiAgent {
             });
 
         if let Err(message) = send_result {
-            return message;
+            return EnkiAgentRunResult {
+                output: message,
+                steps: Vec::new(),
+            };
         }
 
         reply_rx
             .await
-            .unwrap_or_else(|_| "Worker error: agent worker dropped reply channel".to_string())
+            .map(EnkiAgentRunResult::from)
+            .unwrap_or_else(|_| EnkiAgentRunResult {
+                output: "Worker error: agent worker dropped reply channel".to_string(),
+                steps: Vec::new(),
+            })
     }
 }
 
@@ -768,6 +807,35 @@ impl From<MemoryEntry> for EnkiMemoryEntry {
             timestamp_ns: value.timestamp_ns.min(u64::MAX as u128) as u64,
         }
     }
+}
+
+impl From<CoreExecutionStep> for EnkiExecutionStep {
+    fn from(value: CoreExecutionStep) -> Self {
+        Self {
+            index: value.index.min(u64::MAX as usize) as u64,
+            phase: value.phase,
+            kind: value.kind,
+            detail: value.detail,
+        }
+    }
+}
+
+impl From<CoreAgentRunResult> for EnkiAgentRunResult {
+    fn from(value: CoreAgentRunResult) -> Self {
+        Self {
+            output: value.content,
+            steps: value.steps.into_iter().map(EnkiExecutionStep::from).collect(),
+        }
+    }
+}
+
+pub fn init_logger(level: String) {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level)),
+        )
+        .try_init();
 }
 
 uniffi::include_scaffolding!("enki");

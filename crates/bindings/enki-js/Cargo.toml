@@ -14,6 +14,8 @@ core_next = { package = "core", path = "../../core", features = ["default", "uni
 async-trait = "0.1"
 serde_json = "1"
 tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [build-dependencies]
 napi-build = "2"

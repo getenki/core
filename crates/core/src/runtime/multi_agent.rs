@@ -1,11 +1,10 @@
-use crate::agent::{Agent, AgentDefinition};
+use crate::agent::{Agent, AgentDefinition, AgentRunResult};
 use crate::llm::LlmProvider;
 use crate::memory::MemoryManager;
 use crate::registry::{AgentCard, AgentRegistry, AgentStatus, FirstMatchSelector, PeerSelector};
-use crate::runtime::{Runtime, RuntimeHandler, RuntimeRequest, RuntimeResponse, SessionContext};
 use crate::tooling::delegation_tools::{DelegateTaskTool, DiscoverAgentsTool};
 use crate::tooling::tool_calling::{RegistryToolExecutor, ToolExecutor};
-use crate::tooling::types::{DelegateFn, DelegationContext, Tool, ToolContext, ToolRegistry};
+use crate::tooling::types::{DelegateFn, Tool, ToolRegistry};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -37,12 +36,21 @@ impl MultiAgentRuntime {
         session_id: &str,
         message: &str,
     ) -> Result<String, String> {
+        Ok(self.process_detailed(agent_id, session_id, message).await?.content)
+    }
+
+    pub async fn process_detailed(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+        message: &str,
+    ) -> Result<AgentRunResult, String> {
         let agent = self
             .agents
             .get(agent_id)
             .ok_or_else(|| format!("Agent '{agent_id}' not found in runtime."))?;
 
-        Ok(agent.run(session_id, message).await)
+        Ok(agent.run_detailed(session_id, message).await)
     }
 
     pub fn registry(&self) -> &Arc<AgentRegistry> {

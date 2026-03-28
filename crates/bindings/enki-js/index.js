@@ -576,6 +576,7 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
+module.exports.initLogger = nativeBinding.initLogger
 module.exports.NativeEnkiAgent = nativeBinding.NativeEnkiAgent
 module.exports.NativeMultiAgentRuntime = nativeBinding.NativeMultiAgentRuntime
 module.exports.JsAgentStatus = nativeBinding.JsAgentStatus

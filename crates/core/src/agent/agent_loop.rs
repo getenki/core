@@ -3,13 +3,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::agent::core::Agent;
-use crate::agent::types::StepOutcome;
+use crate::agent::types::{AgentRunResult, ExecutionStep, StepOutcome};
 use crate::message::{Message, next_request_id};
 use crate::tooling::types::ToolContext;
 
 #[async_trait(?Send)]
 pub trait AgentLoop {
-    async fn run(&self, agent: &Agent, session_id: &str, user_message: &str) -> String;
+    async fn run_detailed(
+        &self,
+        agent: &Agent,
+        session_id: &str,
+        user_message: &str,
+    ) -> AgentRunResult;
+
+    async fn run(&self, agent: &Agent, session_id: &str, user_message: &str) -> String {
+        self.run_detailed(agent, session_id, user_message)
+            .await
+            .content
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -54,6 +65,7 @@ pub enum LoopDirective {
     Continue {
         next_phase: LoopPhase,
         tool_calls_made: usize,
+        tool_names: Vec<String>,
     },
     Retry {
         reason: String,
@@ -65,6 +77,21 @@ pub enum LoopDirective {
 pub struct DefaultAgentLoop;
 
 impl DefaultAgentLoop {
+    fn push_step(
+        &self,
+        steps: &mut Vec<ExecutionStep>,
+        phase: &LoopPhase,
+        kind: impl Into<String>,
+        detail: impl Into<String>,
+    ) {
+        steps.push(ExecutionStep {
+            index: steps.len() + 1,
+            phase: format!("{phase:?}"),
+            kind: kind.into(),
+            detail: detail.into(),
+        });
+    }
+
     async fn load_execution_state(&self, agent: &Agent, session_id: &str) -> ExecutionState {
         // Swap this for real persisted state storage when ready.
         // For now, start fresh each run.
@@ -177,7 +204,7 @@ impl DefaultAgentLoop {
             | LoopPhase::Act
             | LoopPhase::Observe
             | LoopPhase::Recover => match agent.step(messages, ctx).await {
-                Ok(StepOutcome::Continue) => {
+                Ok(StepOutcome::Continue { tool_names }) => {
                     let tool_calls_after = self.tool_calls_from_messages(messages);
                     let new_tool_calls = tool_calls_after.saturating_sub(tool_calls_before);
 
@@ -190,6 +217,7 @@ impl DefaultAgentLoop {
                     Ok(LoopDirective::Continue {
                         next_phase,
                         tool_calls_made: new_tool_calls,
+                        tool_names,
                     })
                 }
                 Ok(StepOutcome::Final(content)) => Ok(LoopDirective::Final(content)),
@@ -213,7 +241,8 @@ impl DefaultAgentLoop {
         messages: &mut Vec<Message>,
         state: &ExecutionState,
         content: String,
-    ) -> String {
+        steps: Vec<ExecutionStep>,
+    ) -> AgentRunResult {
         let _ = agent
             .memory
             .record_all(session_id, user_message, &content)
@@ -223,7 +252,7 @@ impl DefaultAgentLoop {
         agent.persist_state(session_id, messages).await;
         self.persist_execution_state(agent, session_id, state).await;
 
-        content
+        AgentRunResult { content, steps }
     }
 
     async fn finalize_failure(
@@ -234,7 +263,8 @@ impl DefaultAgentLoop {
         messages: &mut Vec<Message>,
         state: &ExecutionState,
         content: String,
-    ) -> String {
+        steps: Vec<ExecutionStep>,
+    ) -> AgentRunResult {
         Agent::push_out_message(
             messages,
             serde_json::json!({
@@ -252,28 +282,74 @@ impl DefaultAgentLoop {
         agent.persist_state(session_id, messages).await;
         self.persist_execution_state(agent, session_id, state).await;
 
-        content
+        AgentRunResult { content, steps }
     }
 }
 
 #[async_trait(?Send)]
 impl AgentLoop for DefaultAgentLoop {
-    async fn run(&self, agent: &Agent, session_id: &str, user_message: &str) -> String {
+    async fn run_detailed(
+        &self,
+        agent: &Agent,
+        session_id: &str,
+        user_message: &str,
+    ) -> AgentRunResult {
         let mut ctx = agent.workspace.tool_context(session_id);
+        let mut steps = Vec::new();
 
         let mut messages = match self
             .initialize_messages(agent, session_id, user_message)
             .await
         {
             Ok(messages) => messages,
-            Err(e) => return e,
+            Err(e) => {
+                self.push_step(
+                    &mut steps,
+                    &LoopPhase::Understand,
+                    "error",
+                    format!("Failed to initialize session: {e}"),
+                );
+                return AgentRunResult { content: e, steps };
+            }
         };
 
         let mut state = self.load_execution_state(agent, session_id).await;
         state.phase = LoopPhase::Understand;
+        self.push_step(
+            &mut steps,
+            &state.phase,
+            "start",
+            format!("Starting run for session `{session_id}`"),
+        );
+
+        tracing::info!(
+            session_id = session_id,
+            "Starting agent execution loop"
+        );
 
         loop {
+            let current_phase = state.phase.clone();
+            let iteration = state.budget.iterations + 1;
+            self.push_step(
+                &mut steps,
+                &current_phase,
+                "iteration",
+                format!("Iteration {iteration} entered {current_phase:?}"),
+            );
+            tracing::info!(
+                phase = ?state.phase,
+                iteration = state.budget.iterations,
+                "Agent loop step"
+            );
+
             if let Some(stop_reason) = self.should_stop(agent, &state) {
+                tracing::warn!(reason = %stop_reason, "Stopping agent loop prematurely");
+                self.push_step(
+                    &mut steps,
+                    &state.phase,
+                    "stop",
+                    stop_reason.clone(),
+                );
                 return self
                     .finalize_failure(
                         agent,
@@ -282,6 +358,7 @@ impl AgentLoop for DefaultAgentLoop {
                         &mut messages,
                         &state,
                         stop_reason,
+                        steps,
                     )
                     .await;
             }
@@ -303,7 +380,23 @@ impl AgentLoop for DefaultAgentLoop {
                 LoopDirective::Continue {
                     next_phase,
                     tool_calls_made,
+                    tool_names,
                 } => {
+                    tracing::info!(
+                        next_phase = ?next_phase,
+                        tool_calls = tool_calls_made,
+                        "Continuing agent loop"
+                    );
+                    let detail = if tool_names.is_empty() {
+                        format!("No tool call. Advancing to {next_phase:?}")
+                    } else {
+                        format!(
+                            "Executed tool(s): {}. Advancing to {next_phase:?}",
+                            tool_names.join(", ")
+                        )
+                    };
+                    self.push_step(&mut steps, &state.phase, "continue", detail);
+
                     state.phase = next_phase;
                     state.budget.tool_calls += tool_calls_made;
                     state.last_error = None;
@@ -314,12 +407,31 @@ impl AgentLoop for DefaultAgentLoop {
                 }
 
                 LoopDirective::Retry { reason, next_phase } => {
+                    tracing::warn!(
+                        reason = %reason,
+                        next_phase = ?next_phase,
+                        retries = state.budget.retries,
+                        "Retrying agent loop"
+                    );
+                    self.push_step(
+                        &mut steps,
+                        &state.phase,
+                        "retry",
+                        format!("Retrying after error: {reason}"),
+                    );
+
                     state.budget.retries += 1;
                     state.last_error = Some(reason.clone());
                     state.phase = next_phase;
 
                     if state.budget.retries > self.max_retries() {
                         let content = format!("LLM error: {reason}");
+                        self.push_step(
+                            &mut steps,
+                            &state.phase,
+                            "failed",
+                            content.clone(),
+                        );
                         return self
                             .finalize_failure(
                                 agent,
@@ -328,6 +440,7 @@ impl AgentLoop for DefaultAgentLoop {
                                 &mut messages,
                                 &state,
                                 content,
+                                steps,
                             )
                             .await;
                     }
@@ -346,7 +459,14 @@ impl AgentLoop for DefaultAgentLoop {
                 }
 
                 LoopDirective::Final(content) => {
+                    tracing::info!("Agent loop finalized successfully");
                     state.phase = LoopPhase::Finalize;
+                    self.push_step(
+                        &mut steps,
+                        &state.phase,
+                        "final",
+                        "Agent produced a final response".to_string(),
+                    );
                     return self
                         .finalize_success(
                             agent,
@@ -355,6 +475,7 @@ impl AgentLoop for DefaultAgentLoop {
                             &mut messages,
                             &state,
                             content,
+                            steps,
                         )
                         .await;
                 }

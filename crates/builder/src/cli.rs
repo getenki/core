@@ -9,6 +9,10 @@ use std::path::PathBuf;
     propagate_version = true
 )]
 pub struct Cli {
+    /// Logging level (error, warn, info, debug, trace)
+    #[arg(long, global = true, default_value = "warn")]
+    pub log_level: String,
+
     #[command(subcommand)]
     pub command: Command,
 }

@@ -6,13 +6,13 @@ capabilities = [
 ]
 id = "assistant"
 max_iterations = 20
-model = "ollama::qwen3.5"
+model = "ollama::qwen3.5:0.8b"
 name = "Personal Assistant"
 system_prompt = "You are a helpful personal assistant. You help users with tasks, answer questions, and provide guidance."
 
 [[agent]]
 id = "hr_manager_ast"
-model = "ollama::qwen3.5"
+model = "ollama::qwen3.5:0.8b"
 name = "hr_manager_ast"
 script = "src/agents/hr_manager_ast.py"
 system_prompt = "You are a helpful assistant."

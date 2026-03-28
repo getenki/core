@@ -2,6 +2,7 @@ import {
     JsAgentStatus,
     NativeMultiAgentRuntime,
     type JsAgentCard,
+    type JsAgentRunResult,
     type JsMultiAgentMember,
 } from '@getenki/ai'
 
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
     const researchCards = (await runtime.discover('research', JsAgentStatus.Online)) as JsAgentCard[]
     printCards('\nResearch-capable agents:', researchCards)
 
-    const response = String(await runtime.process(
+    const result = await runtime.processWithTrace(
         'coordinator',
         'basic-ts-multi-agent-session',
         [
@@ -66,9 +67,14 @@ async function main(): Promise<void> {
             'Then delegate_task to the researcher to answer this question: what is the purpose of this example?',
             'Return the delegated answer and mention which agent handled it.',
         ].join(' '),
-    ))
+    ) as JsAgentRunResult
 
-    console.log('\nCoordinator response:\n', response)
+    console.log('\nExecution steps:')
+    for (const step of result.steps) {
+        console.log(`${step.index}. [${step.phase}] ${step.kind}: ${step.detail}`)
+    }
+
+    console.log('\nCoordinator response:\n', result.output)
 }
 
 main().catch((error: unknown) => {

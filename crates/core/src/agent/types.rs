@@ -21,8 +21,24 @@ impl Default for AgentDefinition {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionStep {
+    pub index: usize,
+    pub phase: String,
+    pub kind: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRunResult {
+    pub content: String,
+    pub steps: Vec<ExecutionStep>,
+}
+
 pub enum StepOutcome {
-    Continue,
+    Continue {
+        tool_names: Vec<String>,
+    },
     Final(String),
 }
 

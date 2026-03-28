@@ -1,7 +1,10 @@
 #![deny(clippy::all)]
 
 use async_trait::async_trait;
-use core_next::agent::{Agent as CoreAgent, AgentDefinition};
+use core_next::agent::{
+  Agent as CoreAgent, AgentDefinition, AgentRunResult as CoreAgentRunResult,
+  ExecutionStep as CoreExecutionStep,
+};
 use core_next::memory::{
   MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
 };
@@ -17,6 +20,16 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
+
+#[napi]
+pub fn init_logger(level: String) {
+  let _ = tracing_subscriber::fmt()
+    .with_env_filter(
+      tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level)),
+    )
+    .try_init();
+}
 
 const DEFAULT_NAME: &str = "Personal Assistant";
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful Personal Assistant agent.";
@@ -59,7 +72,7 @@ type SessionCallback<'scope> = Function<'scope, FnArgs<(String, String)>, ()>;
 struct RunRequest {
   session_id: String,
   user_message: String,
-  reply_tx: mpsc::Sender<String>,
+  reply_tx: mpsc::Sender<CoreAgentRunResult>,
 }
 
 struct AgentHandle {
@@ -76,7 +89,20 @@ pub struct RunTask {
   user_message: String,
 }
 
+pub struct RunWithTraceTask {
+  inner: Arc<AgentHandle>,
+  session_id: String,
+  user_message: String,
+}
+
 pub struct MultiAgentProcessTask {
+  inner: Arc<MultiAgentHandle>,
+  agent_id: String,
+  session_id: String,
+  user_message: String,
+}
+
+pub struct MultiAgentProcessWithTraceTask {
   inner: Arc<MultiAgentHandle>,
   agent_id: String,
   session_id: String,
@@ -183,7 +209,7 @@ enum MultiAgentRequest {
     agent_id: String,
     session_id: String,
     user_message: String,
-    reply_tx: mpsc::Sender<Result<String, String>>,
+    reply_tx: mpsc::Sender<Result<CoreAgentRunResult, String>>,
   },
   Registry {
     reply_tx: mpsc::Sender<Result<Vec<JsAgentCard>, String>>,
@@ -253,6 +279,20 @@ pub struct JsMemoryEntry {
   pub kind: JsMemoryKind,
   pub relevance: f64,
   pub timestamp_ns: String,
+}
+
+#[napi(object)]
+pub struct JsExecutionStep {
+  pub index: u32,
+  pub phase: String,
+  pub kind: String,
+  pub detail: String,
+}
+
+#[napi(object)]
+pub struct JsAgentRunResult {
+  pub output: String,
+  pub steps: Vec<JsExecutionStep>,
 }
 
 #[napi(js_name = "NativeEnkiAgent")]
@@ -507,6 +547,19 @@ impl NativeEnkiAgent {
       user_message,
     })
   }
+
+  #[napi(js_name = "runWithTrace")]
+  pub fn run_with_trace(
+    &self,
+    session_id: String,
+    user_message: String,
+  ) -> AsyncTask<RunWithTraceTask> {
+    AsyncTask::new(RunWithTraceTask {
+      inner: Arc::clone(&self.inner),
+      session_id,
+      user_message,
+    })
+  }
 }
 
 #[napi]
@@ -533,6 +586,21 @@ impl NativeMultiAgentRuntime {
     user_message: String,
   ) -> AsyncTask<MultiAgentProcessTask> {
     AsyncTask::new(MultiAgentProcessTask {
+      inner: Arc::clone(&self.inner),
+      agent_id,
+      session_id,
+      user_message,
+    })
+  }
+
+  #[napi(js_name = "processWithTrace")]
+  pub fn process_with_trace(
+    &self,
+    agent_id: String,
+    session_id: String,
+    user_message: String,
+  ) -> AsyncTask<MultiAgentProcessWithTraceTask> {
+    AsyncTask::new(MultiAgentProcessWithTraceTask {
       inner: Arc::clone(&self.inner),
       agent_id,
       session_id,
@@ -617,7 +685,7 @@ impl NativeEnkiAgent {
 }
 
 impl Task for RunTask {
-  type Output = String;
+  type Output = CoreAgentRunResult;
   type JsValue = String;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
@@ -643,12 +711,43 @@ impl Task for RunTask {
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(output)
+    Ok(output.content)
+  }
+}
+
+impl Task for RunWithTraceTask {
+  type Output = CoreAgentRunResult;
+  type JsValue = JsAgentRunResult;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = RunRequest {
+      session_id: self.session_id.clone(),
+      user_message: self.user_message.clone(),
+      reply_tx,
+    };
+
+    let sender =
+      self.inner.request_tx.lock().map_err(|_| {
+        napi::Error::from_reason("Worker error: request mutex poisoned".to_string())
+      })?;
+
+    sender.send(request).map_err(|_| {
+      napi::Error::from_reason("Worker error: agent worker has stopped".to_string())
+    })?;
+
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(JsAgentRunResult::from(output))
   }
 }
 
 impl Task for MultiAgentProcessTask {
-  type Output = String;
+  type Output = CoreAgentRunResult;
   type JsValue = String;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
@@ -676,7 +775,40 @@ impl Task for MultiAgentProcessTask {
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(output)
+    Ok(output.content)
+  }
+}
+
+impl Task for MultiAgentProcessWithTraceTask {
+  type Output = CoreAgentRunResult;
+  type JsValue = JsAgentRunResult;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = MultiAgentRequest::Process {
+      agent_id: self.agent_id.clone(),
+      session_id: self.session_id.clone(),
+      user_message: self.user_message.clone(),
+      reply_tx,
+    };
+
+    let sender =
+      self.inner.request_tx.lock().map_err(|_| {
+        napi::Error::from_reason("Worker error: request mutex poisoned".to_string())
+      })?;
+
+    sender.send(request).map_err(|_| {
+      napi::Error::from_reason("Worker error: multi-agent worker has stopped".to_string())
+    })?;
+
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(JsAgentRunResult::from(output))
   }
 }
 
@@ -966,6 +1098,13 @@ fn build_memory_manager(
   MemoryManager::new(Box::new(JsMemoryRouter { provider_names }), providers)
 }
 
+fn error_run_result(message: impl Into<String>) -> CoreAgentRunResult {
+  CoreAgentRunResult {
+    content: message.into(),
+    steps: Vec::new(),
+  }
+}
+
 fn spawn_agent_worker(
   definition: AgentDefinition,
   workspace_home: Option<String>,
@@ -986,9 +1125,9 @@ fn spawn_agent_worker(
           "Initialization error: failed to create tokio runtime: {error}"
         )));
         for request in request_rx {
-          let _ = request
-            .reply_tx
-            .send("Initialization error: failed to create tokio runtime".to_string());
+          let _ = request.reply_tx.send(error_run_result(
+            "Initialization error: failed to create tokio runtime",
+          ));
         }
         return;
       }
@@ -1014,7 +1153,7 @@ fn spawn_agent_worker(
         let message = format!("Initialization error: {error}");
         let _ = ready_tx.send(Err(message.clone()));
         for request in request_rx {
-          let _ = request.reply_tx.send(message.clone());
+          let _ = request.reply_tx.send(error_run_result(message.clone()));
         }
         return;
       }
@@ -1023,7 +1162,8 @@ fn spawn_agent_worker(
     let _ = ready_tx.send(Ok(()));
 
     for request in request_rx {
-      let response = runtime.block_on(agent.run(&request.session_id, &request.user_message));
+      let response =
+        runtime.block_on(agent.run_detailed(&request.session_id, &request.user_message));
       let _ = request.reply_tx.send(response);
     }
   });
@@ -1102,8 +1242,8 @@ fn spawn_multi_agent_worker(
           user_message,
           reply_tx,
         } => {
-          let response =
-            runtime.block_on(runtime_instance.process(&agent_id, &session_id, &user_message));
+          let response = runtime
+            .block_on(runtime_instance.process_detailed(&agent_id, &session_id, &user_message));
           let _ = reply_tx.send(response);
         }
         MultiAgentRequest::Registry { reply_tx } => {
@@ -1238,6 +1378,26 @@ impl From<MemoryEntry> for JsMemoryEntry {
       kind: value.kind.into(),
       relevance: value.relevance as f64,
       timestamp_ns: value.timestamp_ns.to_string(),
+    }
+  }
+}
+
+impl From<CoreExecutionStep> for JsExecutionStep {
+  fn from(value: CoreExecutionStep) -> Self {
+    Self {
+      index: value.index.min(u32::MAX as usize) as u32,
+      phase: value.phase,
+      kind: value.kind,
+      detail: value.detail,
+    }
+  }
+}
+
+impl From<CoreAgentRunResult> for JsAgentRunResult {
+  fn from(value: CoreAgentRunResult) -> Self {
+    Self {
+      output: value.content,
+      steps: value.steps.into_iter().map(JsExecutionStep::from).collect(),
     }
   }
 }

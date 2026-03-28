@@ -72,11 +72,12 @@ pub async fn run(args: RunArgs) -> Result<(), String> {
         );
 
         let runtime = builder.build().await?;
-        let response = runtime
-            .process(agent_id, "cli-session", &args.message)
+        let result = runtime
+            .process_detailed(agent_id, "cli-session", &args.message)
             .await?;
 
-        println!("\x1b[1;33m{}:\x1b[0m {}", agent_cfg.name, response);
+        print_execution_steps(&result.steps);
+        println!("\x1b[1;33m{}:\x1b[0m {}", agent_cfg.name, result.content);
     } else {
         if project_runtime::is_python_project(project_dir) {
             let first_agent = &manifest.agents[0];
@@ -129,11 +130,12 @@ pub async fn run(args: RunArgs) -> Result<(), String> {
         println!("  \x1b[2mMessage:\x1b[0m {}", args.message);
         println!();
 
-        let response = runtime
-            .process(&first_agent.id, "cli-session", &args.message)
+        let result = runtime
+            .process_detailed(&first_agent.id, "cli-session", &args.message)
             .await?;
 
-        println!("\x1b[1;33m{}:\x1b[0m {}", first_agent.name, response);
+        print_execution_steps(&result.steps);
+        println!("\x1b[1;33m{}:\x1b[0m {}", first_agent.name, result.content);
     }
 
     println!();
@@ -146,4 +148,19 @@ fn resolve_workspace_home(args: &RunArgs, manifest: &Manifest) -> String {
         .join(&manifest.workspace.home)
         .to_string_lossy()
         .to_string()
+}
+
+fn print_execution_steps(steps: &[core_next::agent::ExecutionStep]) {
+    if steps.is_empty() {
+        return;
+    }
+
+    println!("  \x1b[2mExecution steps:\x1b[0m");
+    for step in steps {
+        println!(
+            "    {}. [{}] {}: {}",
+            step.index, step.phase, step.kind, step.detail
+        );
+    }
+    println!();
 }
