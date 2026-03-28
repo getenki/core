@@ -1,4 +1,4 @@
-use crate::runtime::{InputChannel, RuntimeRequest, RuntimeResponse};
+use crate::runtime::{InputChannel, RuntimeEvent, RuntimeRequest};
 use async_trait::async_trait;
 
 pub struct CliChannel {
@@ -27,8 +27,15 @@ impl InputChannel for CliChannel {
         self.pending.take()
     }
 
-    async fn send(&mut self, response: RuntimeResponse) -> Result<(), String> {
-        println!("{}", response.content);
+    async fn send(&mut self, event: RuntimeEvent) -> Result<(), String> {
+        match event {
+            RuntimeEvent::Step { step, .. } => {
+                println!("{}. [{}] {}: {}", step.index, step.phase, step.kind, step.detail);
+            }
+            RuntimeEvent::Final(response) => {
+                println!("{}", response.content);
+            }
+        }
         Ok(())
     }
 }

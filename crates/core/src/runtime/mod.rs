@@ -9,8 +9,8 @@ pub use channels::CliChannel;
 pub use core::Runtime;
 pub use multi_agent::{MultiAgentRuntime, MultiAgentRuntimeBuilder};
 pub use types::{
-    InputChannel, RuntimeDetailedResponse, RuntimeHandler, RuntimeRequest, RuntimeResponse,
-    SessionContext,
+    InputChannel, RuntimeDetailedResponse, RuntimeEvent, RuntimeHandler, RuntimeRequest,
+    RuntimeResponse, SessionContext,
 };
 
 #[cfg(test)]

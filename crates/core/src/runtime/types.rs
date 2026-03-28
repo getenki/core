@@ -55,6 +55,18 @@ pub struct RuntimeDetailedResponse {
     pub steps: Vec<ExecutionStep>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeEvent {
+    Step {
+        request_id: String,
+        session_id: String,
+        channel_id: String,
+        sequence: u64,
+        step: ExecutionStep,
+    },
+    Final(RuntimeResponse),
+}
+
 #[async_trait(?Send)]
 pub trait RuntimeHandler {
     async fn handle(
@@ -76,7 +88,7 @@ pub trait RuntimeHandler {
 #[async_trait(?Send)]
 pub trait InputChannel {
     async fn recv(&mut self) -> Option<RuntimeRequest>;
-    async fn send(&mut self, response: RuntimeResponse) -> Result<(), String>;
+    async fn send(&mut self, event: RuntimeEvent) -> Result<(), String>;
 }
 
 pub(crate) fn current_timestamp_nanos() -> u128 {

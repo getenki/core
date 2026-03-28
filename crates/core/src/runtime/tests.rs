@@ -1,5 +1,5 @@
 use crate::agent::ExecutionStep;
-use crate::runtime::{Runtime, RuntimeHandler, RuntimeRequest, SessionContext};
+use crate::runtime::{InputChannel, Runtime, RuntimeEvent, RuntimeHandler, RuntimeRequest, SessionContext};
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -153,4 +153,50 @@ async fn process_detailed_routes_trace_through_runtime_handler() {
     assert_eq!(result.steps.len(), 1);
     assert_eq!(result.steps[0].detail, "hello:1");
     assert_eq!(seen.lock().unwrap().as_slice(), ["hello:1"]);
+}
+
+struct RecordingChannel {
+    pending: Option<RuntimeRequest>,
+    events: Arc<Mutex<Vec<RuntimeEvent>>>,
+}
+
+#[async_trait(?Send)]
+impl InputChannel for RecordingChannel {
+    async fn recv(&mut self) -> Option<RuntimeRequest> {
+        self.pending.take()
+    }
+
+    async fn send(&mut self, event: RuntimeEvent) -> Result<(), String> {
+        self.events.lock().await.push(event);
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn serve_channel_streams_trace_events_before_final_response() {
+    let runtime = Runtime::new(DetailedHandler);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let mut channel = RecordingChannel {
+        pending: Some(RuntimeRequest::new("session-a", "cli", "hello")),
+        events: Arc::clone(&events),
+    };
+
+    runtime.serve_channel(&mut channel).await.unwrap();
+
+    let recorded = events.lock().await;
+    assert_eq!(recorded.len(), 2);
+    match &recorded[0] {
+        RuntimeEvent::Step { step, sequence, .. } => {
+            assert_eq!(*sequence, 1);
+            assert_eq!(step.detail, "hello:1");
+        }
+        other => panic!("expected step event, got {other:?}"),
+    }
+    match &recorded[1] {
+        RuntimeEvent::Final(response) => {
+            assert_eq!(response.sequence, 1);
+            assert_eq!(response.content, "detailed:hello");
+        }
+        other => panic!("expected final event, got {other:?}"),
+    }
 }

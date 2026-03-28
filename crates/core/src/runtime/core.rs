@@ -1,6 +1,6 @@
 use crate::runtime::{
-    InputChannel, RuntimeDetailedResponse, RuntimeHandler, RuntimeRequest, RuntimeResponse,
-    SessionContext,
+    InputChannel, RuntimeDetailedResponse, RuntimeEvent, RuntimeHandler, RuntimeRequest,
+    RuntimeResponse, SessionContext,
 };
 use std::collections::HashMap;
 use std::sync::{
@@ -121,8 +121,19 @@ where
         C: InputChannel,
     {
         while let Some(request) = channel.recv().await {
-            let response = self.process(request).await?;
-            channel.send(response).await?;
+            let traced = self.process_detailed(request, None).await?;
+            for step in traced.steps.iter().cloned() {
+                channel
+                    .send(RuntimeEvent::Step {
+                        request_id: traced.response.request_id.clone(),
+                        session_id: traced.response.session_id.clone(),
+                        channel_id: traced.response.channel_id.clone(),
+                        sequence: traced.response.sequence,
+                        step,
+                    })
+                    .await?;
+            }
+            channel.send(RuntimeEvent::Final(traced.response)).await?;
         }
 
         Ok(())
