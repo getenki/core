@@ -236,9 +236,9 @@ async fn spawn_python(
     args: &[String],
     stream: bool,
 ) -> Result<String, io::Error> {
+    use std::io::Write;
     use std::process::Stdio;
     use tokio::io::{AsyncBufReadExt, BufReader};
-    use std::io::Write;
 
     let mut command = build_python_command(project_dir, program, args);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());

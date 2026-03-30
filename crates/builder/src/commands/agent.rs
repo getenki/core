@@ -40,11 +40,14 @@ fn to_pascal_case(s: &str) -> String {
 
 pub fn run(args: AddAgentArgs) -> Result<(), String> {
     if !args.manifest.exists() {
-        return Err(format!("Manifest file not found at {}.", args.manifest.display()));
+        return Err(format!(
+            "Manifest file not found at {}.",
+            args.manifest.display()
+        ));
     }
 
-    let mut content = fs::read_to_string(&args.manifest)
-        .map_err(|e| format!("Failed to read manifest: {e}"))?;
+    let mut content =
+        fs::read_to_string(&args.manifest).map_err(|e| format!("Failed to read manifest: {e}"))?;
 
     let agent_id = args.name.clone(); // In real world it could be slugified
     let agent_name = args.name.clone();
@@ -67,15 +70,18 @@ pub fn run(args: AddAgentArgs) -> Result<(), String> {
 
     content.push_str(&new_block);
 
-    fs::write(&args.manifest, content)
-        .map_err(|e| format!("Failed to update manifest: {e}"))?;
+    fs::write(&args.manifest, content).map_err(|e| format!("Failed to update manifest: {e}"))?;
 
-    println!("\x1b[1;32m✓\x1b[0m Registered agent '{}' in {}.", agent_name, args.manifest.display());
+    println!(
+        "\x1b[1;32m✓\x1b[0m Registered agent '{}' in {}.",
+        agent_name,
+        args.manifest.display()
+    );
 
     if let Some(path_str) = script_path {
         let manifest_dir = args.manifest.parent().unwrap_or(Path::new("."));
         let full_path = manifest_dir.join(&path_str);
-        
+
         if let Some(parent) = full_path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create agent directory: {e}"))?;
@@ -89,8 +95,11 @@ pub fn run(args: AddAgentArgs) -> Result<(), String> {
             .replace("{AGENT_CLASS_NAME}", &agent_class_name);
         fs::write(&full_path, script_content)
             .map_err(|e| format!("Failed to write agent script: {e}"))?;
-            
-        println!("\x1b[1;32m✓\x1b[0m Created boilerplate agent script at {}.", full_path.display());
+
+        println!(
+            "\x1b[1;32m✓\x1b[0m Created boilerplate agent script at {}.",
+            full_path.display()
+        );
     }
 
     Ok(())

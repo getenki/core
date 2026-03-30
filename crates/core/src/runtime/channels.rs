@@ -64,9 +64,8 @@ impl InteractiveChannel {
     /// waits.
     pub fn new(session_id: impl Into<String>, initial_message: Option<String>) -> Self {
         let session_id = session_id.into();
-        let pending = initial_message.map(|msg| {
-            RuntimeRequest::new(session_id.clone(), "cli", msg)
-        });
+        let pending =
+            initial_message.map(|msg| RuntimeRequest::new(session_id.clone(), "cli", msg));
         Self {
             session_id,
             pending,
@@ -135,10 +134,7 @@ impl InputChannel for InteractiveChannel {
 // Shared event handling for both channels
 // ---------------------------------------------------------------------------
 
-fn send_cli_event(
-    event: RuntimeEvent,
-    pending: &mut Option<RuntimeRequest>,
-) -> Result<(), String> {
+fn send_cli_event(event: RuntimeEvent, pending: &mut Option<RuntimeRequest>) -> Result<(), String> {
     match event {
         RuntimeEvent::Step { step, .. } => {
             println!(

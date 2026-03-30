@@ -186,12 +186,7 @@ impl RuntimeHandler for AgentRuntimeHandler {
     ) -> Result<(String, Vec<crate::agent::ExecutionStep>), String> {
         let result = self
             .agent
-            .run_detailed_with_human(
-                &request.session_id,
-                &request.content,
-                on_step,
-                human,
-            )
+            .run_detailed_with_human(&request.session_id, &request.content, on_step, human)
             .await;
 
         if request.channel_id == "cli" {

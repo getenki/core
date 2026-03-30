@@ -380,10 +380,7 @@ impl AgentLoop for DefaultAgentLoop {
             format!("Starting run for session `{session_id}`"),
         );
 
-        tracing::info!(
-            session_id = session_id,
-            "Starting agent execution loop"
-        );
+        tracing::info!(session_id = session_id, "Starting agent execution loop");
 
         loop {
             let current_phase = state.phase.clone();
@@ -480,7 +477,13 @@ impl AgentLoop for DefaultAgentLoop {
                             tool_names.join(", ")
                         )
                     };
-                    self.push_step(on_step.as_ref(), &mut steps, &state.phase, "continue", detail);
+                    self.push_step(
+                        on_step.as_ref(),
+                        &mut steps,
+                        &state.phase,
+                        "continue",
+                        detail,
+                    );
 
                     state.phase = next_phase;
                     state.budget.tool_calls += tool_calls_made;

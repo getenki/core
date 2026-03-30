@@ -1,9 +1,11 @@
 use crate::agent::ExecutionStep;
-use crate::runtime::{InputChannel, Runtime, RuntimeEvent, RuntimeHandler, RuntimeRequest, SessionContext};
+use crate::runtime::{
+    InputChannel, Runtime, RuntimeEvent, RuntimeHandler, RuntimeRequest, SessionContext,
+};
 use async_trait::async_trait;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex as StdMutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
 

@@ -49,7 +49,7 @@ impl Tool for AskHumanTool {
             None => {
                 return "Error: human-in-the-loop is not available. \
                         No human channel is configured for this agent."
-                    .to_string()
+                    .to_string();
             }
         };
 
@@ -131,10 +131,7 @@ mod tests {
         let human: Arc<dyn AskHumanFn> = Arc::new(FailingHuman);
         let tool = AskHumanTool;
         let result = tool
-            .execute(
-                &json!({"query": "hello?"}),
-                &ctx_with_human(Some(human)),
-            )
+            .execute(&json!({"query": "hello?"}), &ctx_with_human(Some(human)))
             .await;
         assert!(result.contains("channel closed"));
     }
@@ -145,9 +142,7 @@ mod tests {
             reply: "ok".to_string(),
         });
         let tool = AskHumanTool;
-        let result = tool
-            .execute(&json!({}), &ctx_with_human(Some(human)))
-            .await;
+        let result = tool.execute(&json!({}), &ctx_with_human(Some(human))).await;
         assert!(result.starts_with("Error: failed to parse arguments:"));
     }
 }

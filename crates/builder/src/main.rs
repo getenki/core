@@ -1,5 +1,6 @@
 mod cli;
 mod commands;
+mod interactive_cli;
 mod manifest;
 mod project_runtime;
 

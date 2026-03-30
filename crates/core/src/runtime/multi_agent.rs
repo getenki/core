@@ -36,7 +36,10 @@ impl MultiAgentRuntime {
         session_id: &str,
         message: &str,
     ) -> Result<String, String> {
-        Ok(self.process_detailed(agent_id, session_id, message, None).await?.content)
+        Ok(self
+            .process_detailed(agent_id, session_id, message, None)
+            .await?
+            .content)
     }
 
     pub async fn process_detailed(

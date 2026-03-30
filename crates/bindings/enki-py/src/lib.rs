@@ -822,7 +822,7 @@ impl EnkiAgent {
         handler: Box<dyn EnkiStepHandler>,
     ) -> EnkiAgentRunResult {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        
+
         let handler_arc: Arc<dyn EnkiStepHandler> = handler.into();
         let step_closure = Arc::new(move |step: CoreExecutionStep| {
             handler_arc.on_step(step.into());
@@ -923,7 +923,11 @@ impl From<CoreAgentRunResult> for EnkiAgentRunResult {
     fn from(value: CoreAgentRunResult) -> Self {
         Self {
             output: value.content,
-            steps: value.steps.into_iter().map(EnkiExecutionStep::from).collect(),
+            steps: value
+                .steps
+                .into_iter()
+                .map(EnkiExecutionStep::from)
+                .collect(),
         }
     }
 }

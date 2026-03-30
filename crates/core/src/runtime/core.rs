@@ -179,8 +179,7 @@ where
             let channel_id = request.channel_id.clone();
 
             // Create the human query channel for this request.
-            let (human_tx, mut human_rx) =
-                tokio::sync::mpsc::channel::<HumanQuery>(1);
+            let (human_tx, mut human_rx) = tokio::sync::mpsc::channel::<HumanQuery>(1);
 
             let human_fn = Arc::new(ChannelHumanFn::new(human_tx));
 
