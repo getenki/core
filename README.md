@@ -6,7 +6,7 @@
 
 Async-first multi-agent framework built on Rust and Tokio.
 
-This repository contains the current `core-next` workspace for Enki's Rust runtime plus the `enki-py` Python bindings and the `enki-js` WASM bindings.
+This repository contains the current `core-next` workspace for Enki's Rust runtime, the `enki-py` Python bindings, the `@getenki/ai` Node.js bindings, and the `enki` builder CLI.
 
 ## Docs
 
@@ -32,17 +32,20 @@ This repository contains the current `core-next` workspace for Enki's Rust runti
 The workspace currently contains:
 
 - `crates/core`: Rust agent runtime, memory system, tool execution, LLM provider abstraction, and CLI entrypoint
-- `crates/bindings/enki-js`: `wasm-bindgen` JavaScript bindings for browser-safe, callback-driven agent execution
+- `crates/builder`: manifest-driven CLI for scaffolding, running, testing, monitoring, and interactive sessions
+- `crates/bindings/enki-js`: native Node.js bindings built with `napi-rs`
 - `crates/bindings/enki-py`: UniFFI-based Python bindings and higher-level Python package packaging
-- `docs/enki-py`: the docs site source used to publish `docs.getenki.com`
+- `docs/enki-doc`: the docs site source used to publish `docs.getenki.com`
 
 ## What This Repo Builds
 
 - A stateful agent runtime with persistent sessions and workspace-backed execution
 - Built-in tools for `read_file`, `write_file`, and `exec`
+- Human-in-the-loop runtime support through the intrinsic `ask_human` tool
+- Execution tracing through per-step `ExecutionStep` events
 - Multi-provider LLM support via the `provider::model` format
-- Python bindings exposing `EnkiAgent`, `EnkiTool`, and `EnkiToolHandler`
-- JavaScript/WASM bindings exposing `EnkiJsAgent` with JS-provided LLM and tool callbacks
+- Python bindings exposing low-level FFI types plus the high-level `Agent` wrapper and `MultiAgentRuntime`
+- JavaScript bindings exposing `NativeEnkiAgent`, `NativeMultiAgentRuntime`, and traced run results
 
 Examples of supported model strings in the current codebase:
 
@@ -88,12 +91,22 @@ maturin develop
 From `crates/bindings/enki-js`:
 
 ```powershell
-wasm-pack build --target bundler --out-dir pkg
+npm install
+npm run build
+```
+
+### Builder CLI
+
+From the repository root:
+
+```powershell
+cargo build -p builder
+cargo run -p builder -- --help
 ```
 
 ### Docs site
 
-The published docs' build instructions currently say to run the site from `docs/enki-py` with Node.js 18+:
+Run the site from `docs/enki-doc` with Node.js 18+:
 
 ```powershell
 npm install
@@ -108,7 +121,7 @@ npm run build
 
 ## Run
 
-The current Rust CLI expects:
+The low-level Rust `core` binary expects:
 
 ```text
 core <session_id> "<message>"
@@ -122,6 +135,13 @@ cargo run -p core -- session-1 "Summarize the repository structure"
 ```
 
 If you do not inject an LLM in code, the runtime resolves the model from `ENKI_MODEL`.
+
+For manifest-driven app workflows, prefer the `enki` builder CLI:
+
+```powershell
+cargo run -p builder -- run --message "Summarize the repository structure"
+cargo run -p builder -- join
+```
 
 ## Examples
 
@@ -164,11 +184,11 @@ This repo contains the low-level Rust-backed binding implementation in `crates/b
 
 ## JavaScript API
 
-The WASM binding in `crates/bindings/enki-js` is browser-oriented:
+The Node.js binding in `crates/bindings/enki-js` exposes:
 
-- session state is stored in memory
-- the LLM is supplied by an async JavaScript callback
-- tool execution is supplied by an optional async JavaScript callback
+- `NativeEnkiAgent`
+- `NativeMultiAgentRuntime`
+- `runWithTrace()` and `processWithTrace()` for traced execution
 
 ## Persistence
 

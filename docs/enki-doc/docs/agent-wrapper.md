@@ -11,6 +11,7 @@ The wrapper exposes:
 
 - `Agent`
 - `AgentRunResult`
+- `ExecutionStep`
 - `MemoryBackend`
 - `MemoryEntry`
 - `MemoryKind`
@@ -100,6 +101,27 @@ print(result.output)
 ```
 
 `run_sync()` uses `asyncio.run()` when no loop is active, and falls back to a background thread if a loop is already running.
+
+## Inspect execution steps
+
+Every run returns an `AgentRunResult` with:
+
+- `output`
+- `steps`
+
+You can also observe steps during execution with `on_step`:
+
+```python
+from enki_py import Agent, ExecutionStep
+
+agent = Agent("ollama::qwen3.5:latest")
+
+def log_step(step: ExecutionStep) -> None:
+    print(f"[{step.index}] {step.phase} -> {step.kind}: {step.detail}")
+
+result = agent.run_sync("List the main runtime components.", on_step=log_step)
+print(result.output)
+```
 
 ## Tool schemas
 

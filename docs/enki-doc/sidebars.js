@@ -1,6 +1,7 @@
 const sidebars = {
     docsSidebar: [
         "intro",
+        "builder-cli",
         {
             type: "category",
             label: "Python",

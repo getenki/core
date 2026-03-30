@@ -36,6 +36,20 @@ npm run build
 
 This crate publishes the native Node.js package `@getenki/ai` via `napi-rs`.
 
+## Build the builder CLI
+
+From the repository root:
+
+```bash
+cargo build -p builder
+```
+
+Run the CLI locally with:
+
+```bash
+cargo run -p builder -- --help
+```
+
 ## Run the docs site
 
 From `docs/enki-doc`:

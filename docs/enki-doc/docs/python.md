@@ -22,7 +22,7 @@ uv add enki-py
 It exposes two layers:
 
 - A generated low-level API built around `EnkiAgent`, `EnkiTool`, and `EnkiToolHandler`
-- A higher-level Python wrapper in `enki_py.agent` that adds decorator-based tools, custom memory backends, dependency injection, sync helpers, and Python-native multi-agent orchestration
+- A higher-level Python wrapper in `enki_py.agent` that adds decorator-based tools, custom memory backends, dependency injection, sync helpers, step tracing, Python-side LLM adapters, and Python-native multi-agent orchestration
 
 ## What to use
 
@@ -62,6 +62,48 @@ if __name__ == "__main__":
     import asyncio
 
     asyncio.run(hello_enki())
+```
+
+## Execution tracing
+
+`Agent.run()` and `Agent.run_sync()` return `AgentRunResult`, which includes both `output` and `steps`.
+
+You can also stream steps as they happen with `on_step`:
+
+```python
+from enki_py import Agent, ExecutionStep
+
+agent = Agent(
+    "ollama::qwen3.5:latest",
+    instructions="Answer clearly and keep responses short.",
+)
+
+def print_step(step: ExecutionStep) -> None:
+    print(f"[{step.index}] {step.phase}/{step.kind}: {step.detail}")
+
+result = agent.run_sync("Explain what this project does.", on_step=print_step)
+print(result.output)
+```
+
+The step stream mirrors the Rust runtime's execution phases and is the easiest way to inspect tool calls and loop progress from Python.
+
+## Python-side LLM providers
+
+The high-level `Agent` accepts `llm=` for a custom provider backend or callback.
+
+Two common options are:
+
+- use the built-in `LiteLlmProvider`
+- pass your own callable that receives `model`, `messages`, and `tools`
+
+```python
+from enki_py import Agent, LiteLlmProvider
+
+agent = Agent(
+    "openai::gpt-4o",
+    instructions="Be concise.",
+    llm=LiteLlmProvider(),
+)
 ```
 
 ## Low-Level API

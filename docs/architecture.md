@@ -15,7 +15,7 @@ By maintaining the control loop in Rust, we ensure:
 
 The architecture is divided into three primary crates:
 1. `crates/core`: The pure Rust engine containing all logical abstractions.
-2. `crates/bindings`: FFI layers (`napi-rs` for Node, `PyO3` for Python) wrapping the core.
+2. `crates/bindings`: FFI layers (`napi-rs` for Node, UniFFI for Python) wrapping the core.
 3. `crates/builder`: A CLI that orchestrates local developer workflows (`enki.toml`).
 
 ```mermaid
@@ -86,7 +86,7 @@ The agent itself (`Agent`) is highly modular, depending on interfaces rather tha
 - **`ToolRegistry` & `ToolExecutor`**: Centralized mapping of available functions.
 
 ### Observability
-The core loop defines `ExecutionStep` instances that track index, phase, kind, and detail. These trigger `on_step` callbacks, bubbling up through the FFI boundary synchronously to provide real-time terminal or UI streaming in any language.
+The core loop defines `ExecutionStep` instances that track index, phase, kind, and detail. These trigger `on_step` callbacks, bubble through the FFI boundary, and power the trace APIs exposed by Python (`on_step`, `AgentRunResult.steps`) and JavaScript (`runWithTrace`, `processWithTrace`).
 
 ---
 
@@ -97,10 +97,11 @@ Enki natively scales from a single `Agent` to a distributed `MultiAgentRuntime`.
 ### `AgentRegistry`
 When the Multi-Agent runtime starts, every agent registers an `AgentCard` describing its ID, name, status (`Online/Offline/Busy`), and semantic capabilities (`code-gen`, `search`, etc.).
 
-### Intrinsic Delegation Tools
+### Intrinsic Tools
 The multi-agent runtime automatically injects foundational tools into all agents:
 1. **`DiscoverAgentsTool`**: Plugs into the LLM, allowing it to dynamically query the registry.
 2. **`DelegateTaskTool`**: Allows an agent to spin up an isolated session context targeted at another agent. The delegated task runs natively in its own thread/loop, safely isolated from the calling agent's context.
+3. **`AskHumanTool`**: Lets an agent pause execution and request a human reply when the runtime is serving an interactive channel.
 
 ---
 
@@ -109,11 +110,11 @@ The multi-agent runtime automatically injects foundational tools into all agents
 The most complex and powerful part of Enki is how it exposes the Rust runtime to Garbage-Collected languages without compromising thread safety.
 
 **Key implementations:**
-- `enki-js` uses `napi-rs` and `ThreadsafeFunction`.
-- `enki-py` uses `PyO3` and raw thread polling.
+- `enki-js` uses `napi-rs`.
+- `enki-py` uses UniFFI-backed bindings plus a Python wrapper layer in `python/enki_py/agent.py`.
 
 ### The Tokio Worker Thread Pattern
-Languages like JavaScript are strictly single-threaded (per isolate), and Python relies heavily on the Global Interpreter Lock (GIL). You cannot safely run a blocking Rust asynchronous loop on the main thread.
+Languages like JavaScript are strictly single-threaded (per isolate), and Python code frequently runs under an active event loop or the GIL. You cannot safely run the Rust async runtime directly on the host application's main thread.
 
 To solve this, Enki uses the **Worker Thread Pattern**:
 1. When an `EnkiAgent` is instantiated in JS/Python, Rust spawns a dedicated background OS thread.
@@ -147,11 +148,12 @@ sequenceDiagram
 ```
 
 ### Trait Translation (Callbacks)
-When an agent calls a tool that was written in Python, the Rust Engine hits an FFI wall. Enki solves this via "Bridging Traits":
-- It implements pure Rust versions of `Tool`, `MemoryProvider`, etc., like `PythonTool` or `JsMemoryProvider`.
-- When `execute()` is triggered on the Rust side, the bridge struct serializes the context and fires a thread-safe callback *across* the boundary back to Node/Python.
-- In Node, `ThreadsafeFunction` schedules the invocation on the V8 event loop.
-- The Rust loop `.await`s the result safely without freezing the host language block.
+When an agent calls a tool or memory backend written in Python or JavaScript, the Rust engine hits an FFI wall. Enki solves this via bridge implementations:
+- Rust bridge types serialize tool context, memory payloads, and execution steps.
+- The callback is routed back into Node.js or Python.
+- The Rust loop awaits the response and resumes without changing the core execution model.
+
+For human-in-the-loop execution, the runtime also injects an `AskHumanFn` into tool context. The `ask_human` intrinsic sends a query over an internal channel, the serving runtime emits a human-request event, and the agent resumes once a reply is posted back on that channel.
 
 ---
 
@@ -167,6 +169,12 @@ To achieve zero-friction usage (`enki run`), the Rust CLI acts as an orchestrato
 1. `project_runtime.rs` automatically walks the tree to locate a local `.venv` or global system python.
 2. It executes a pre-built internal stub (`enki_py.builder`).
 3. It passes the **entire manifest configuration** (Agents, Tools logic, models) via a highly compressed, serialized CLI argument vector to avoid writing temp files.
+
+The builder now also exposes:
+- `enki monitor` for manifest inspection
+- `enki test` for quick connectivity checks
+- `enki join` for interactive human-in-the-loop sessions
+- `enki tool new` and `enki agent add` for scaffolding project assets
 
 ### Introspection Magic
 Inside `enki_py.builder`, Python uses `importlib` and `inspect.signature` to parse user-defined tools. It automatically detects if a tool needs standard `args` or deep Enki `Context`, wraps it transparently, attaches it to the FFI `Agent` layer, and starts the internal stream.

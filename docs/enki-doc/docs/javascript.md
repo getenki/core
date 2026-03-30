@@ -13,6 +13,8 @@ This package is the current JavaScript surface. We are not publishing a WASM bin
 
 - `NativeEnkiAgent`
 - `NativeMultiAgentRuntime`
+- `JsAgentRunResult`
+- `JsExecutionStep`
 - `JsAgentStatus`
 - `JsAgentCard`
 - `JsMemoryKind`
@@ -26,6 +28,11 @@ This package is the current JavaScript surface. We are not publishing a WASM bin
 - `NativeEnkiAgent.withTools(...)`
 - `NativeEnkiAgent.withMemory(...)`
 - `NativeEnkiAgent.withToolsAndMemory(...)`
+
+For traced runs, the package also exposes:
+
+- `agent.runWithTrace(sessionId, userMessage)`
+- `runtime.processWithTrace(agentId, sessionId, userMessage)`
 
 ## Install
 
@@ -58,6 +65,26 @@ async function main() {
 }
 
 main().catch(console.error)
+```
+
+If you need execution steps, use `runWithTrace(...)` instead of `run(...)`:
+
+```js
+const { NativeEnkiAgent } = require('@getenki/ai')
+
+async function main() {
+  const agent = new NativeEnkiAgent(
+    'Assistant',
+    'Answer clearly and keep responses short.',
+    'ollama::qwen3.5:latest',
+    20,
+    process.cwd(),
+  )
+
+  const result = await agent.runWithTrace('session-1', 'Explain what this project does.')
+  console.log(result.output)
+  console.log(result.steps)
+}
 ```
 
 Constructor arguments:
@@ -194,6 +221,17 @@ Supported memory kinds:
 - `JsMemoryKind.Preference`
 
 For multi-agent orchestration from Node.js, see [JavaScript Multi-Agent](/docs/javascript-multi-agent).
+
+## Multi-agent runtime
+
+`NativeMultiAgentRuntime` is the Rust-backed registry and delegation runtime exposed to JavaScript.
+
+Current methods:
+
+- `process(agentId, sessionId, userMessage)`
+- `processWithTrace(agentId, sessionId, userMessage)`
+- `registry()`
+- `discover(capability?, status?)`
 
 ## Development
 

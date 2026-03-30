@@ -11,7 +11,8 @@ This site tracks the current `core-next` workspace:
 
 - [Python](/docs/python): the published `enki-py` package, high-level `Agent` wrapper, multi-agent runtime, low-level bindings, and memory APIs
 - [JavaScript](/docs/javascript): the published `@getenki/ai` native Node.js package with single-agent and multi-agent runtimes
-- [Rust](/docs/rust): the core runtime workspace, crate layout, and local build workflow
+- [Rust](/docs/rust): the core runtime workspace, crate layout, execution tracing, and local build workflow
+- [Builder CLI](/docs/builder-cli): manifest-driven project scaffolding, execution, monitoring, and interactive sessions
 
 ## Choose your entry point
 
@@ -28,6 +29,7 @@ Start here:
 - [Python overview](/docs/python)
 - [Installation](/docs/installation)
 - [Getting Started Guide](/docs/agent-wrapper)
+- [Examples](/docs/examples)
 
 ### JavaScript
 
@@ -36,6 +38,7 @@ Use JavaScript when you want to run Enki from Node.js through the native `@geten
 Start here:
 
 - [JavaScript overview](/docs/javascript)
+- [JavaScript Multi-Agent](/docs/javascript-multi-agent)
 - [TypeScript](/docs/typescript)
 
 ### Rust
@@ -45,4 +48,5 @@ Use Rust when you want the underlying runtime, workspace crates, or contributor 
 Start here:
 
 - [Rust overview](/docs/rust)
+- [Builder CLI](/docs/builder-cli)
 - [Build from Source](/docs/build-from-source)
