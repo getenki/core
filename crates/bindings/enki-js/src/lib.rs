@@ -14,9 +14,9 @@ use core_next::runtime::{
 };
 use core_next::tooling::tool_calling::RegistryToolExecutor;
 use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
-use napi::bindgen_prelude::{AsyncTask, FnArgs, Function, JsObjectValue, Object, Unknown};
+use napi::bindgen_prelude::{FnArgs, Function, JsObjectValue, Object, Unknown};
 use napi::threadsafe_function::{ThreadsafeCallContext, ThreadsafeFunction};
-use napi::{Env, JSON, JsValue, Task};
+use napi::{Env, JSON, JsValue};
 use napi_derive::napi;
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -83,42 +83,6 @@ struct AgentHandle {
 
 struct MultiAgentHandle {
   request_tx: Mutex<mpsc::Sender<MultiAgentRequest>>,
-}
-
-pub struct RunTask {
-  inner: Arc<AgentHandle>,
-  session_id: String,
-  user_message: String,
-}
-
-pub struct RunWithTraceTask {
-  inner: Arc<AgentHandle>,
-  session_id: String,
-  user_message: String,
-}
-
-pub struct MultiAgentProcessTask {
-  inner: Arc<MultiAgentHandle>,
-  agent_id: String,
-  session_id: String,
-  user_message: String,
-}
-
-pub struct MultiAgentProcessWithTraceTask {
-  inner: Arc<MultiAgentHandle>,
-  agent_id: String,
-  session_id: String,
-  user_message: String,
-}
-
-pub struct MultiAgentRegistryTask {
-  inner: Arc<MultiAgentHandle>,
-}
-
-pub struct MultiAgentDiscoverTask {
-  inner: Arc<MultiAgentHandle>,
-  capability: Option<String>,
-  status: Option<JsAgentStatus>,
 }
 
 struct JsTool {
@@ -569,26 +533,25 @@ impl NativeEnkiAgent {
     })
   }
 
-  #[napi]
-  pub fn run(&self, session_id: String, user_message: String) -> AsyncTask<RunTask> {
-    AsyncTask::new(RunTask {
-      inner: Arc::clone(&self.inner),
-      session_id,
-      user_message,
-    })
+  pub async fn run(&self, session_id: String, user_message: String) -> napi::Result<String> {
+    let inner = Arc::clone(&self.inner);
+    tokio::task::spawn_blocking(move || inner.run(session_id, user_message))
+      .await
+      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
+      .map(|result| result.content)
   }
 
   #[napi(js_name = "runWithTrace")]
-  pub fn run_with_trace(
+  pub async fn run_with_trace(
     &self,
     session_id: String,
     user_message: String,
-  ) -> AsyncTask<RunWithTraceTask> {
-    AsyncTask::new(RunWithTraceTask {
-      inner: Arc::clone(&self.inner),
-      session_id,
-      user_message,
-    })
+  ) -> napi::Result<JsAgentRunResult> {
+    let inner = Arc::clone(&self.inner);
+    tokio::task::spawn_blocking(move || inner.run(session_id, user_message))
+      .await
+      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
+      .map(JsAgentRunResult::from)
   }
 }
 
@@ -608,54 +571,49 @@ impl NativeMultiAgentRuntime {
     })
   }
 
-  #[napi]
-  pub fn process(
+  pub async fn process(
     &self,
     agent_id: String,
     session_id: String,
     user_message: String,
-  ) -> AsyncTask<MultiAgentProcessTask> {
-    AsyncTask::new(MultiAgentProcessTask {
-      inner: Arc::clone(&self.inner),
-      agent_id,
-      session_id,
-      user_message,
-    })
+  ) -> napi::Result<String> {
+    let inner = Arc::clone(&self.inner);
+    tokio::task::spawn_blocking(move || inner.process(agent_id, session_id, user_message))
+      .await
+      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
+      .map(|result| result.content)
   }
 
   #[napi(js_name = "processWithTrace")]
-  pub fn process_with_trace(
+  pub async fn process_with_trace(
     &self,
     agent_id: String,
     session_id: String,
     user_message: String,
-  ) -> AsyncTask<MultiAgentProcessWithTraceTask> {
-    AsyncTask::new(MultiAgentProcessWithTraceTask {
-      inner: Arc::clone(&self.inner),
-      agent_id,
-      session_id,
-      user_message,
-    })
+  ) -> napi::Result<JsAgentRunResult> {
+    let inner = Arc::clone(&self.inner);
+    let result = tokio::task::spawn_blocking(move || inner.process(agent_id, session_id, user_message))
+      .await
+      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))??;
+    Ok(JsAgentRunResult::from(result))
   }
 
-  #[napi]
-  pub fn registry(&self) -> AsyncTask<MultiAgentRegistryTask> {
-    AsyncTask::new(MultiAgentRegistryTask {
-      inner: Arc::clone(&self.inner),
-    })
+  pub async fn registry(&self) -> napi::Result<Vec<JsAgentCard>> {
+    let inner = Arc::clone(&self.inner);
+    tokio::task::spawn_blocking(move || inner.registry())
+      .await
+      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
   }
 
-  #[napi]
-  pub fn discover(
+  pub async fn discover(
     &self,
     capability: Option<String>,
     status: Option<JsAgentStatus>,
-  ) -> AsyncTask<MultiAgentDiscoverTask> {
-    AsyncTask::new(MultiAgentDiscoverTask {
-      inner: Arc::clone(&self.inner),
-      capability,
-      status,
-    })
+  ) -> napi::Result<Vec<JsAgentCard>> {
+    let inner = Arc::clone(&self.inner);
+    tokio::task::spawn_blocking(move || inner.discover(capability, status))
+      .await
+      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
   }
 }
 
@@ -714,22 +672,19 @@ impl NativeEnkiAgent {
   }
 }
 
-impl Task for RunTask {
-  type Output = CoreAgentRunResult;
-  type JsValue = String;
-
-  fn compute(&mut self) -> napi::Result<Self::Output> {
+impl AgentHandle {
+  fn run(&self, session_id: String, user_message: String) -> napi::Result<CoreAgentRunResult> {
     let (reply_tx, reply_rx) = mpsc::channel();
     let request = RunRequest {
-      session_id: self.session_id.clone(),
-      user_message: self.user_message.clone(),
+      session_id,
+      user_message,
       reply_tx,
     };
 
-    let sender =
-      self.inner.request_tx.lock().map_err(|_| {
-        napi::Error::from_reason("Worker error: request mutex poisoned".to_string())
-      })?;
+    let sender = self
+      .request_tx
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Worker error: request mutex poisoned".to_string()))?;
 
     sender.send(request).map_err(|_| {
       napi::Error::from_reason("Worker error: agent worker has stopped".to_string())
@@ -739,60 +694,27 @@ impl Task for RunTask {
       .recv()
       .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))
   }
-
-  fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(output.content)
-  }
 }
 
-impl Task for RunWithTraceTask {
-  type Output = CoreAgentRunResult;
-  type JsValue = JsAgentRunResult;
-
-  fn compute(&mut self) -> napi::Result<Self::Output> {
-    let (reply_tx, reply_rx) = mpsc::channel();
-    let request = RunRequest {
-      session_id: self.session_id.clone(),
-      user_message: self.user_message.clone(),
-      reply_tx,
-    };
-
-    let sender =
-      self.inner.request_tx.lock().map_err(|_| {
-        napi::Error::from_reason("Worker error: request mutex poisoned".to_string())
-      })?;
-
-    sender.send(request).map_err(|_| {
-      napi::Error::from_reason("Worker error: agent worker has stopped".to_string())
-    })?;
-
-    reply_rx
-      .recv()
-      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))
-  }
-
-  fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(JsAgentRunResult::from(output))
-  }
-}
-
-impl Task for MultiAgentProcessTask {
-  type Output = CoreAgentRunResult;
-  type JsValue = String;
-
-  fn compute(&mut self) -> napi::Result<Self::Output> {
+impl MultiAgentHandle {
+  fn process(
+    &self,
+    agent_id: String,
+    session_id: String,
+    user_message: String,
+  ) -> napi::Result<CoreAgentRunResult> {
     let (reply_tx, reply_rx) = mpsc::channel();
     let request = MultiAgentRequest::Process {
-      agent_id: self.agent_id.clone(),
-      session_id: self.session_id.clone(),
-      user_message: self.user_message.clone(),
+      agent_id,
+      session_id,
+      user_message,
       reply_tx,
     };
 
-    let sender =
-      self.inner.request_tx.lock().map_err(|_| {
-        napi::Error::from_reason("Worker error: request mutex poisoned".to_string())
-      })?;
+    let sender = self
+      .request_tx
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Worker error: request mutex poisoned".to_string()))?;
 
     sender.send(request).map_err(|_| {
       napi::Error::from_reason("Worker error: multi-agent worker has stopped".to_string())
@@ -804,56 +726,14 @@ impl Task for MultiAgentProcessTask {
       .map_err(napi::Error::from_reason)
   }
 
-  fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(output.content)
-  }
-}
-
-impl Task for MultiAgentProcessWithTraceTask {
-  type Output = CoreAgentRunResult;
-  type JsValue = JsAgentRunResult;
-
-  fn compute(&mut self) -> napi::Result<Self::Output> {
-    let (reply_tx, reply_rx) = mpsc::channel();
-    let request = MultiAgentRequest::Process {
-      agent_id: self.agent_id.clone(),
-      session_id: self.session_id.clone(),
-      user_message: self.user_message.clone(),
-      reply_tx,
-    };
-
-    let sender =
-      self.inner.request_tx.lock().map_err(|_| {
-        napi::Error::from_reason("Worker error: request mutex poisoned".to_string())
-      })?;
-
-    sender.send(request).map_err(|_| {
-      napi::Error::from_reason("Worker error: multi-agent worker has stopped".to_string())
-    })?;
-
-    reply_rx
-      .recv()
-      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
-      .map_err(napi::Error::from_reason)
-  }
-
-  fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(JsAgentRunResult::from(output))
-  }
-}
-
-impl Task for MultiAgentRegistryTask {
-  type Output = Vec<JsAgentCard>;
-  type JsValue = Vec<JsAgentCard>;
-
-  fn compute(&mut self) -> napi::Result<Self::Output> {
+  fn registry(&self) -> napi::Result<Vec<JsAgentCard>> {
     let (reply_tx, reply_rx) = mpsc::channel();
     let request = MultiAgentRequest::Registry { reply_tx };
 
-    let sender =
-      self.inner.request_tx.lock().map_err(|_| {
-        napi::Error::from_reason("Worker error: request mutex poisoned".to_string())
-      })?;
+    let sender = self
+      .request_tx
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Worker error: request mutex poisoned".to_string()))?;
 
     sender.send(request).map_err(|_| {
       napi::Error::from_reason("Worker error: multi-agent worker has stopped".to_string())
@@ -865,27 +745,22 @@ impl Task for MultiAgentRegistryTask {
       .map_err(napi::Error::from_reason)
   }
 
-  fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(output)
-  }
-}
-
-impl Task for MultiAgentDiscoverTask {
-  type Output = Vec<JsAgentCard>;
-  type JsValue = Vec<JsAgentCard>;
-
-  fn compute(&mut self) -> napi::Result<Self::Output> {
+  fn discover(
+    &self,
+    capability: Option<String>,
+    status: Option<JsAgentStatus>,
+  ) -> napi::Result<Vec<JsAgentCard>> {
     let (reply_tx, reply_rx) = mpsc::channel();
     let request = MultiAgentRequest::Discover {
-      capability: self.capability.clone(),
-      status: self.status.take(),
+      capability,
+      status,
       reply_tx,
     };
 
-    let sender =
-      self.inner.request_tx.lock().map_err(|_| {
-        napi::Error::from_reason("Worker error: request mutex poisoned".to_string())
-      })?;
+    let sender = self
+      .request_tx
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Worker error: request mutex poisoned".to_string()))?;
 
     sender.send(request).map_err(|_| {
       napi::Error::from_reason("Worker error: multi-agent worker has stopped".to_string())
@@ -895,10 +770,6 @@ impl Task for MultiAgentDiscoverTask {
       .recv()
       .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
       .map_err(napi::Error::from_reason)
-  }
-
-  fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(output)
   }
 }
 

@@ -16,12 +16,17 @@ The package ships prebuilt native binaries for:
 
 ## What It Exports
 
-The current package surface is intentionally small:
+The current package surface is:
 
 - `NativeEnkiAgent`
+- `NativeMultiAgentRuntime`
+- `JsAgentStatus`
 - `JsMemoryKind`
 - `JsMemoryModule`
 - `JsMemoryEntry`
+- `JsAgentCard`
+- `JsAgentRunResult`
+- `JsExecutionStep`
 
 `NativeEnkiAgent` is the main entrypoint. It can be created in four modes:
 
@@ -29,6 +34,14 @@ The current package surface is intentionally small:
 - `NativeEnkiAgent.withTools(...)`
 - `NativeEnkiAgent.withMemory(...)`
 - `NativeEnkiAgent.withToolsAndMemory(...)`
+
+`NativeMultiAgentRuntime` supports:
+
+- `new(...)`
+- `process(...)`
+- `processWithTrace(...)`
+- `registry(...)`
+- `discover(...)`
 
 ## Basic Agent
 

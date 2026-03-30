@@ -202,7 +202,7 @@ The `test/.atomiagent/...` fixtures show the expected on-disk layout.
 
 ## Notes
 
-- The current workspace version is `0.1.2`.
+- The current workspace version is `0.1.3`.
 - The Rust package name is `core`, and the exported library name is `core_next`.
 - The docs site currently brands Enki publicly as in active development/private preview while the open-source core and `enki-py` docs are already published.
 

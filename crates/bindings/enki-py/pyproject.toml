@@ -11,10 +11,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dynamic = ["version"]
-dependencies = [
-    "pytest>=8.3.5",
-    "uniffi-bindgen>=0.31.0",
-]
+dependencies = []
 [project.optional-dependencies]
 litellm = [
     "litellm",

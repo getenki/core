@@ -620,12 +620,6 @@ wheels = [
 [[package]]
 name = "enki-py"
 source = { editable = "." }
-dependencies = [
-    { name = "pytest", version = "8.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "pytest", version = "9.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "uniffi-bindgen" },
-]
 
 [package.optional-dependencies]
 default-llm = [
@@ -646,9 +640,7 @@ tests = [
 requires-dist = [
     { name = "litellm", marker = "extra == 'default-llm'" },
     { name = "litellm", marker = "extra == 'litellm'" },
-    { name = "pytest", specifier = ">=8.3.5" },
     { name = "pytest", marker = "extra == 'tests'" },
-    { name = "uniffi-bindgen", specifier = ">=0.31.0" },
 ]
 provides-extras = ["default-llm", "litellm", "tests"]
 
@@ -4135,22 +4127,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac53367ae42139cf4b1ca5f36bb3dc6c9d33acdb43655/typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464", size = 75949, upload-time = "2025-10-01T02:14:41.687Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/9b/47798a6c91d8bdb567fe2698fe81e0c6b7cb7ef4d13da4114b41d239f65d/typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7", size = 14611, upload-time = "2025-10-01T02:14:40.154Z" },
-]
-
-[[package]]
-name = "uniffi-bindgen"
-version = "0.31.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/60/12/2dd4effdf427ebc1fe648750c764bdb04a2d5239013d3bb48f89d08afa00/uniffi_bindgen-0.31.0.tar.gz", hash = "sha256:4be6414dbfd22f7437489f0ba7d9b7da35129340d1edad00938ccd7e13000fb7", size = 6101, upload-time = "2026-02-17T08:59:26.685Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/96/29/7014b6a4e718c7eca19a5a66d67247574a4b90cd63292dc52b1ce417c51d/uniffi_bindgen-0.31.0-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:116cf48921e7d60e839b07ccea15d5580ff35a3c41eb8400862c4dc2f16d976e", size = 2986063, upload-time = "2026-02-17T08:59:15.496Z" },
-    { url = "https://files.pythonhosted.org/packages/a0/3b/237a2b0495ec5127c3dd6f9f74b442d0ca3f95a016c73b946f2834318c2b/uniffi_bindgen-0.31.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:29c593c5d5d8a090fa5c0293555288c673c2f84e3890a33b570ec8e9d6dc4172", size = 2897397, upload-time = "2026-02-17T08:59:17.147Z" },
-    { url = "https://files.pythonhosted.org/packages/f4/3c/b8e2bda605770e856d16f5dd8f5e9d89fd2cdff9d1f31ca7d0c204e24703/uniffi_bindgen-0.31.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:581b848282f0f85628d562a9f05bbe8960dbd08605dea243e1d0fc65ba022823", size = 3066588, upload-time = "2026-02-17T08:59:18.683Z" },
-    { url = "https://files.pythonhosted.org/packages/97/ce/3b013c309a170ed00e66c185c6b35d4228c15d007a838be83c3743d9c860/uniffi_bindgen-0.31.0-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:87d16627bf8dd11a4014bb97780054d5fe3c42a4cfdf4ffbdde95d4cf8d4a991", size = 3446534, upload-time = "2026-02-17T08:59:19.912Z" },
-    { url = "https://files.pythonhosted.org/packages/e5/3a/5e95a2d4b496e7a94f48350cec04ecfeca1a8879807130f0b5901f76f93c/uniffi_bindgen-0.31.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:af0c164de61721c6f58f4f8c81e48c0dd1b828eb9ddb94c7aa4987013cb8976b", size = 3130552, upload-time = "2026-02-17T08:59:21.134Z" },
-    { url = "https://files.pythonhosted.org/packages/1e/b2/d44530cd9139febf7dd4960f26b23be5fa6bf4b0f1c582c0d409a0404008/uniffi_bindgen-0.31.0-py3-none-win32.whl", hash = "sha256:6db57eb709169a41503db5537f7fd488c20d7eaf2609000681b0f25ba717cf89", size = 2377686, upload-time = "2026-02-17T08:59:22.358Z" },
-    { url = "https://files.pythonhosted.org/packages/d6/49/fb2c8a67820bd59ec5c30b489b7698a356cecd47ee12ea867a631a84ad17/uniffi_bindgen-0.31.0-py3-none-win_amd64.whl", hash = "sha256:41e271a0e0c063f298d2ec6e5f9e023c1129e4aefdb4db6fdfbce98ae59a5218", size = 2758612, upload-time = "2026-02-17T08:59:23.662Z" },
-    { url = "https://files.pythonhosted.org/packages/f1/25/7ab0de066673c5b005a0cca6e969071555b80637316d517688051de49d86/uniffi_bindgen-0.31.0-py3-none-win_arm64.whl", hash = "sha256:1616bce723b7444a678b3e8f198371e7728655d04726ae07749dd78afb99423d", size = 2554164, upload-time = "2026-02-17T08:59:25.351Z" },
 ]
 
 [[package]]
