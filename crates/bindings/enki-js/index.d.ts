@@ -5,12 +5,16 @@ export declare class NativeEnkiAgent {
   static withTools(name: string | undefined | null, systemPromptPreamble: string | undefined | null, model: string | undefined | null, maxIterations: number | undefined | null, workspaceHome: string | undefined | null, tools: Array<object>, toolHandler?: SharedToolCallback | undefined | null): NativeEnkiAgent
   static withMemory(name: string | undefined | null, systemPromptPreamble: string | undefined | null, model: string | undefined | null, maxIterations: number | undefined | null, workspaceHome: string | undefined | null, memories: Array<JsMemoryModule>, recordHandler: RecordCallback, recallHandler: RecallCallback, flushHandler: SessionCallback, consolidateHandler: SessionCallback): NativeEnkiAgent
   static withToolsAndMemory(name: string | undefined | null, systemPromptPreamble: string | undefined | null, model: string | undefined | null, maxIterations: number | undefined | null, workspaceHome: string | undefined | null, tools: Array<object>, toolHandler: SharedToolCallback | undefined | null, memories: Array<JsMemoryModule>, recordHandler: RecordCallback, recallHandler: RecallCallback, flushHandler: SessionCallback, consolidateHandler: SessionCallback): NativeEnkiAgent
+  run(sessionId: string, userMessage: string): Promise<string>
   runWithTrace(sessionId: string, userMessage: string): Promise<JsAgentRunResult>
 }
 
 export declare class NativeMultiAgentRuntime {
   constructor(members: Array<JsMultiAgentMember>, workspaceHome?: string | undefined | null)
+  process(agentId: string, sessionId: string, userMessage: string): Promise<string>
   processWithTrace(agentId: string, sessionId: string, userMessage: string): Promise<JsAgentRunResult>
+  registry(): Promise<Array<JsAgentCard>>
+  discover(capability?: string | undefined | null, status?: JsAgentStatus | undefined | null): Promise<Array<JsAgentCard>>
 }
 
 export declare function initLogger(level: string): void

@@ -112,11 +112,11 @@
     "arrowParens": "always"
   },
   "optionalDependencies": {
-    "@getenki/ai-win32-x64-msvc": "0.4.1",
-    "@getenki/ai-win32-arm64-msvc": "0.4.1",
-    "@getenki/ai-darwin-x64": "0.4.1",
-    "@getenki/ai-darwin-arm64": "0.4.1",
-    "@getenki/ai-linux-x64-gnu": "0.4.1",
-    "@getenki/ai-linux-arm64-gnu": "0.4.1"
+    "@getenki/ai-win32-x64-msvc": "0.4.6",
+    "@getenki/ai-win32-arm64-msvc": "0.4.6",
+    "@getenki/ai-darwin-x64": "0.4.6",
+    "@getenki/ai-darwin-arm64": "0.4.6",
+    "@getenki/ai-linux-x64-gnu": "0.4.6",
+    "@getenki/ai-linux-arm64-gnu": "0.4.6"
   }
 }

@@ -533,6 +533,7 @@ impl NativeEnkiAgent {
     })
   }
 
+  #[napi]
   pub async fn run(&self, session_id: String, user_message: String) -> napi::Result<String> {
     let inner = Arc::clone(&self.inner);
     tokio::task::spawn_blocking(move || inner.run(session_id, user_message))
@@ -571,6 +572,7 @@ impl NativeMultiAgentRuntime {
     })
   }
 
+  #[napi]
   pub async fn process(
     &self,
     agent_id: String,
@@ -598,6 +600,7 @@ impl NativeMultiAgentRuntime {
     Ok(JsAgentRunResult::from(result))
   }
 
+  #[napi]
   pub async fn registry(&self) -> napi::Result<Vec<JsAgentCard>> {
     let inner = Arc::clone(&self.inner);
     tokio::task::spawn_blocking(move || inner.registry())
@@ -605,6 +608,7 @@ impl NativeMultiAgentRuntime {
       .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
   }
 
+  #[napi]
   pub async fn discover(
     &self,
     capability: Option<String>,
