@@ -28,7 +28,7 @@ test('hello_enki_with_tools_and_memory: constructs an agent with a custom tool h
                 }),
             },
         ],
-        (toolName, argsJson) => JSON.stringify({toolName, argsJson}),
+        (toolName: any, argsJson: any) => JSON.stringify({toolName, argsJson}),
         '1. Inspect.\n2. Execute.',
     )
 
