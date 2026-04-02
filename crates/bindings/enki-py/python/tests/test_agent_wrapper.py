@@ -208,6 +208,25 @@ def test_wrapper_uses_litellm_provider_by_default(monkeypatch):
     assert result.output == "default llm:default-model:hello"
 
 
+def test_wrapper_embeds_custom_agentic_loop_in_prompt(monkeypatch):
+    monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
+    monkeypatch.setattr(agent_module, "LiteLlmProvider", FakeLiteLlmProvider)
+
+    agent = agent_module.Agent(
+        "default-model",
+        instructions="Keep replies short.",
+        agentic_loop="1. Think.\n2. Use tools sparingly.\n3. Answer.",
+    )
+    agent.run_sync("hello")
+
+    assert FakeEnkiAgent.last_kwargs["system_prompt_preamble"] == (
+        "Keep replies short.\n"
+        "<enki:agentic-loop>\n"
+        "1. Think.\n2. Use tools sparingly.\n3. Answer.\n"
+        "</enki:agentic-loop>"
+    )
+
+
 def test_litellm_provider_normalizes_completion(monkeypatch):
     calls = {}
 

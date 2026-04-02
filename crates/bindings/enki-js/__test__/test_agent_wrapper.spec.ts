@@ -20,6 +20,8 @@ test.serial('test_agent_wrapper: constructor accepts valid native settings', (t)
     'Answer clearly and keep responses short.',
     'ollama::llama3.2:latest',
     0,
+    null,
+    '1. Plan.\n2. Act.\n3. Verify.',
   )
 
   t.is(typeof agent.run, 'function')
@@ -31,6 +33,7 @@ test.serial('test_agent_wrapper: run starts an async native task', (t) => {
     'Answer clearly and keep responses short.',
     'ollama::llama3.2:latest',
     20,
+    null,
   )
 
   const result = agent.run('session-1', 'Explain what this project does.')

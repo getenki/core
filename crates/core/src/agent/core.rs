@@ -21,6 +21,19 @@ use crate::tooling::builtin_tools;
 use crate::tooling::tool_calling::{RegistryToolExecutor, ToolCallRegistry, ToolExecutor};
 use crate::tooling::types::{ToolContext, ToolRegistry};
 
+const CUSTOM_AGENTIC_LOOP_START: &str = "<enki:agentic-loop>";
+const CUSTOM_AGENTIC_LOOP_END: &str = "</enki:agentic-loop>";
+const DEFAULT_AGENTIC_LOOP: &str = r#"- Process each incoming user message as a loop:
+  1. Receive the message.
+  2. Interpret it.
+  3. Choose the next action.
+  4. Either reply immediately, call a tool, or ask a follow-up question.
+  5. If you call a tool, read the result and continue the loop.
+  6. Stop only when a final reply is ready.
+- One user message may require multiple internal iterations before the final answer.
+- If a tool is needed, prefer native tool calls. If native tool calling is unavailable, respond with ONLY {"tool": "tool_name", "args": {...}}.
+- When done, respond with plain text."#;
+
 pub struct Agent {
     pub definition: AgentDefinition,
     pub tool_registry: ToolCallRegistry,
@@ -195,25 +208,19 @@ impl Agent {
     }
 
     pub fn system_prompt(&self, ctx: &ToolContext, memory_context: &str) -> String {
+        let (system_prompt_preamble, agentic_loop) =
+            Self::split_system_prompt_preamble(&self.definition.system_prompt_preamble);
         let mut prompt = format!(
             r#"You are {}.
 {} Use tools via JSON calls when needed.
-- Process each incoming user message as a loop:
-  1. Receive the message.
-  2. Interpret it.
-  3. Choose the next action.
-  4. Either reply immediately, call a tool, or ask a follow-up question.
-  5. If you call a tool, read the result and continue the loop.
-  6. Stop only when a final reply is ready.
-- One user message may require multiple internal iterations before the final answer.
-- If a tool is needed, prefer native tool calls. If native tool calling is unavailable, respond with ONLY {{"tool": "tool_name", "args": {{...}}}}.
-- When done, respond with plain text.
+{}
 Available tools: {}
 Agent workspace: {}
 Current task workspace: {}
 - When using write_file or read_file, use simple relative paths (e.g. "note.md", "output/data.csv"). Paths are resolved relative to the current task workspace automatically. Do NOT construct full workspace paths manually."#,
             self.definition.name,
-            self.definition.system_prompt_preamble,
+            system_prompt_preamble,
+            agentic_loop,
             self.tool_registry.catalog_json(),
             ctx.agent_dir.display(),
             ctx.workspace_dir.display()
@@ -225,6 +232,43 @@ Current task workspace: {}
         }
 
         prompt
+    }
+
+    pub(crate) fn split_system_prompt_preamble(system_prompt_preamble: &str) -> (String, String) {
+        let Some(start) = system_prompt_preamble.find(CUSTOM_AGENTIC_LOOP_START) else {
+            return (
+                system_prompt_preamble.to_string(),
+                DEFAULT_AGENTIC_LOOP.to_string(),
+            );
+        };
+        let loop_start = start + CUSTOM_AGENTIC_LOOP_START.len();
+        let Some(relative_end) = system_prompt_preamble[loop_start..].find(CUSTOM_AGENTIC_LOOP_END)
+        else {
+            return (
+                system_prompt_preamble.to_string(),
+                DEFAULT_AGENTIC_LOOP.to_string(),
+            );
+        };
+        let loop_end = loop_start + relative_end;
+        let custom_loop = system_prompt_preamble[loop_start..loop_end]
+            .trim()
+            .to_string();
+        let prefix = system_prompt_preamble[..start].trim();
+        let suffix = system_prompt_preamble[loop_end + CUSTOM_AGENTIC_LOOP_END.len()..].trim();
+        let cleaned_preamble = match (prefix.is_empty(), suffix.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => prefix.to_string(),
+            (true, false) => suffix.to_string(),
+            (false, false) => format!("{prefix}\n{suffix}"),
+        };
+
+        let agentic_loop = if custom_loop.is_empty() {
+            DEFAULT_AGENTIC_LOOP.to_string()
+        } else {
+            custom_loop
+        };
+
+        (cleaned_preamble, agentic_loop)
     }
 
     pub fn to_llm_messages(&self, messages: &[Message]) -> Vec<ChatMessage> {

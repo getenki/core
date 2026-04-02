@@ -152,6 +152,7 @@ The repository includes runnable examples under `example/`:
 - `example/basic-ts/index.ts`: basic TypeScript multi-agent runtime example
 - `example/basic-ts/multi-agent-tools-memory.ts`: TypeScript example with researcher/coordinator agents, tool calling, and shared memory
 - `example/enki-py/simple_agent.py`: basic Python single-agent example
+- `example/enki-py/custom_agentic_loop.py`: Python single-agent example with a custom agentic loop prompt
 - `example/enki-py/simple_multi_agent.py`: basic Python multi-agent example
 - `example/enki-py/multi_agent_with_memory_and_tools.py`: Python multi-agent example with tools and shared memory
 

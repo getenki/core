@@ -76,6 +76,8 @@ except ImportError:  # pragma: no cover
 
 DepsT = TypeVar("DepsT")
 _CALLBACK_EVENT_LOOP: asyncio.AbstractEventLoop | None = None
+_CUSTOM_AGENTIC_LOOP_START = "<enki:agentic-loop>"
+_CUSTOM_AGENTIC_LOOP_END = "</enki:agentic-loop>"
 
 
 @dataclass(frozen=True)
@@ -720,6 +722,7 @@ class Agent(Generic[DepsT]):
             *,
             deps_type: type[DepsT] | None = None,
             instructions: str = "",
+            agentic_loop: str | None = None,
             name: str = "Agent",
             max_iterations: int = 20,
             workspace_home: str | None = None,
@@ -730,6 +733,7 @@ class Agent(Generic[DepsT]):
         self.model = model
         self.deps_type = deps_type
         self.instructions = instructions
+        self.agentic_loop = agentic_loop
         self.name = name
         self.max_iterations = max_iterations
         self.workspace_home = workspace_home
@@ -783,10 +787,17 @@ class Agent(Generic[DepsT]):
         tool_specs = self._tool_specs()
         memory_specs = self._memory_specs()
 
+        prompt_preamble = self.instructions
+        if self.agentic_loop and self.agentic_loop.strip():
+            prompt_preamble = (
+                f"{prompt_preamble}\n{_CUSTOM_AGENTIC_LOOP_START}\n"
+                f"{self.agentic_loop.strip()}\n{_CUSTOM_AGENTIC_LOOP_END}"
+            )
+
         if self._llm_handler is not None and tool_specs and memory_specs:
             self._backend = _LowLevelEnkiAgent.with_tools_memory_and_llm(
                 name=self.name,
-                system_prompt_preamble=self.instructions,
+                system_prompt_preamble=prompt_preamble,
                 model=self.model,
                 max_iterations=self.max_iterations,
                 workspace_home=self.workspace_home,
@@ -799,7 +810,7 @@ class Agent(Generic[DepsT]):
         elif self._llm_handler is not None and tool_specs:
             self._backend = _LowLevelEnkiAgent.with_tools_and_llm(
                 name=self.name,
-                system_prompt_preamble=self.instructions,
+                system_prompt_preamble=prompt_preamble,
                 model=self.model,
                 max_iterations=self.max_iterations,
                 workspace_home=self.workspace_home,
@@ -810,7 +821,7 @@ class Agent(Generic[DepsT]):
         elif self._llm_handler is not None and memory_specs:
             self._backend = _LowLevelEnkiAgent.with_memory_and_llm(
                 name=self.name,
-                system_prompt_preamble=self.instructions,
+                system_prompt_preamble=prompt_preamble,
                 model=self.model,
                 max_iterations=self.max_iterations,
                 workspace_home=self.workspace_home,
@@ -821,7 +832,7 @@ class Agent(Generic[DepsT]):
         elif self._llm_handler is not None:
             self._backend = _LowLevelEnkiAgent.with_llm(
                 name=self.name,
-                system_prompt_preamble=self.instructions,
+                system_prompt_preamble=prompt_preamble,
                 model=self.model,
                 max_iterations=self.max_iterations,
                 workspace_home=self.workspace_home,
@@ -830,7 +841,7 @@ class Agent(Generic[DepsT]):
         elif tool_specs and memory_specs:
             self._backend = _LowLevelEnkiAgent.with_tools_and_memory(
                 name=self.name,
-                system_prompt_preamble=self.instructions,
+                system_prompt_preamble=prompt_preamble,
                 model=self.model,
                 max_iterations=self.max_iterations,
                 workspace_home=self.workspace_home,
@@ -842,7 +853,7 @@ class Agent(Generic[DepsT]):
         elif tool_specs:
             self._backend = _LowLevelEnkiAgent.with_tools(
                 name=self.name,
-                system_prompt_preamble=self.instructions,
+                system_prompt_preamble=prompt_preamble,
                 model=self.model,
                 max_iterations=self.max_iterations,
                 workspace_home=self.workspace_home,
@@ -852,7 +863,7 @@ class Agent(Generic[DepsT]):
         elif memory_specs:
             self._backend = _LowLevelEnkiAgent.with_memory(
                 name=self.name,
-                system_prompt_preamble=self.instructions,
+                system_prompt_preamble=prompt_preamble,
                 model=self.model,
                 max_iterations=self.max_iterations,
                 workspace_home=self.workspace_home,
@@ -862,7 +873,7 @@ class Agent(Generic[DepsT]):
         else:
             self._backend = _LowLevelEnkiAgent(
                 name=self.name,
-                system_prompt_preamble=self.instructions,
+                system_prompt_preamble=prompt_preamble,
                 model=self.model,
                 max_iterations=self.max_iterations,
                 workspace_home=self.workspace_home,

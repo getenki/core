@@ -36,6 +36,8 @@ pub fn init_logger(level: String) {
 const DEFAULT_NAME: &str = "Personal Assistant";
 const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful Personal Assistant agent.";
 const DEFAULT_MAX_ITERATIONS: u32 = 20;
+const CUSTOM_AGENTIC_LOOP_START: &str = "<enki:agentic-loop>";
+const CUSTOM_AGENTIC_LOOP_END: &str = "</enki:agentic-loop>";
 
 type ToolHandler =
   ThreadsafeFunction<ToolInvocation, String, FnArgs<(String, String)>, napi::Status, false>;
@@ -121,6 +123,7 @@ struct WorkerConfig {
 struct BuildOptions {
   name: Option<String>,
   system_prompt_preamble: Option<String>,
+  agentic_loop: Option<String>,
   model: Option<String>,
   max_iterations: Option<u32>,
   workspace_home: Option<String>,
@@ -424,10 +427,12 @@ impl NativeEnkiAgent {
     model: Option<String>,
     max_iterations: Option<u32>,
     workspace_home: Option<String>,
+    agentic_loop: Option<String>,
   ) -> napi::Result<Self> {
     Self::build(
       name,
       system_prompt_preamble,
+      agentic_loop,
       model,
       max_iterations,
       workspace_home,
@@ -448,12 +453,14 @@ impl NativeEnkiAgent {
     workspace_home: Option<String>,
     tools: Vec<Object<'_>>,
     tool_handler: Option<SharedToolCallback<'_>>,
+    agentic_loop: Option<String>,
   ) -> napi::Result<Self> {
     let tools = resolve_tool_definitions(tools, tool_handler)?;
 
     Self::build(
       name,
       system_prompt_preamble,
+      agentic_loop,
       model,
       max_iterations,
       workspace_home,
@@ -478,11 +485,13 @@ impl NativeEnkiAgent {
     recall_handler: RecallCallback<'_>,
     flush_handler: SessionCallback<'_>,
     consolidate_handler: SessionCallback<'_>,
+    agentic_loop: Option<String>,
   ) -> napi::Result<Self> {
     Self::build_with_memory(MemoryFactoryOptions {
       build: BuildOptions {
         name,
         system_prompt_preamble,
+        agentic_loop,
         model,
         max_iterations,
         workspace_home,
@@ -512,11 +521,13 @@ impl NativeEnkiAgent {
     recall_handler: RecallCallback<'_>,
     flush_handler: SessionCallback<'_>,
     consolidate_handler: SessionCallback<'_>,
+    agentic_loop: Option<String>,
   ) -> napi::Result<Self> {
     Self::build_with_tools_and_memory(ToolAndMemoryFactoryOptions {
       build: BuildOptions {
         name,
         system_prompt_preamble,
+        agentic_loop,
         model,
         max_iterations,
         workspace_home,
@@ -594,9 +605,10 @@ impl NativeMultiAgentRuntime {
     user_message: String,
   ) -> napi::Result<JsAgentRunResult> {
     let inner = Arc::clone(&self.inner);
-    let result = tokio::task::spawn_blocking(move || inner.process(agent_id, session_id, user_message))
-      .await
-      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))??;
+    let result =
+      tokio::task::spawn_blocking(move || inner.process(agent_id, session_id, user_message))
+        .await
+        .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))??;
     Ok(JsAgentRunResult::from(result))
   }
 
@@ -626,6 +638,7 @@ impl NativeEnkiAgent {
     Self::build(
       build.name,
       build.system_prompt_preamble,
+      build.agentic_loop,
       build.model,
       build.max_iterations,
       build.workspace_home,
@@ -660,12 +673,19 @@ impl NativeEnkiAgent {
   fn build(
     name: Option<String>,
     system_prompt_preamble: Option<String>,
+    agentic_loop: Option<String>,
     model: Option<String>,
     max_iterations: Option<u32>,
     workspace_home: Option<String>,
     worker_config: WorkerConfig,
   ) -> napi::Result<Self> {
-    let definition = build_definition(name, system_prompt_preamble, model, max_iterations);
+    let definition = build_definition(
+      name,
+      system_prompt_preamble,
+      agentic_loop,
+      model,
+      max_iterations,
+    );
     let request_tx = spawn_agent_worker(definition, workspace_home, worker_config)?;
 
     Ok(Self {
@@ -780,13 +800,16 @@ impl MultiAgentHandle {
 fn build_definition(
   name: Option<String>,
   system_prompt_preamble: Option<String>,
+  agentic_loop: Option<String>,
   model: Option<String>,
   max_iterations: Option<u32>,
 ) -> AgentDefinition {
   AgentDefinition {
     name: name.unwrap_or_else(|| DEFAULT_NAME.to_string()),
-    system_prompt_preamble: system_prompt_preamble
-      .unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string()),
+    system_prompt_preamble: compose_system_prompt_preamble(
+      system_prompt_preamble.unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string()),
+      agentic_loop,
+    ),
     model: model.unwrap_or_default(),
     max_iterations: max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS).max(1) as usize,
   }
@@ -800,10 +823,28 @@ fn build_multi_agent_definition(
     build_definition(
       Some(member.name),
       member.system_prompt_preamble,
+      None,
       member.model,
       member.max_iterations,
     ),
     member.capabilities,
+  )
+}
+
+fn compose_system_prompt_preamble(
+  system_prompt_preamble: String,
+  agentic_loop: Option<String>,
+) -> String {
+  let Some(agentic_loop) = agentic_loop.map(|value| value.trim().to_string()) else {
+    return system_prompt_preamble;
+  };
+
+  if agentic_loop.is_empty() {
+    return system_prompt_preamble;
+  }
+
+  format!(
+    "{system_prompt_preamble}\n{CUSTOM_AGENTIC_LOOP_START}\n{agentic_loop}\n{CUSTOM_AGENTIC_LOOP_END}"
   )
 }
 

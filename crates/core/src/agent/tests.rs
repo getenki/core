@@ -208,6 +208,27 @@ fn extracts_tool_call_from_code_fence() {
     );
 }
 
+#[test]
+fn system_prompt_uses_default_agentic_loop_when_no_override_is_present() {
+    let (preamble, agentic_loop) = Agent::split_system_prompt_preamble("Keep responses concise.");
+
+    assert_eq!(preamble, "Keep responses concise.");
+    assert!(agentic_loop.contains("Process each incoming user message as a loop"));
+}
+
+#[test]
+fn system_prompt_extracts_custom_agentic_loop_from_preamble() {
+    let (preamble, agentic_loop) = Agent::split_system_prompt_preamble(
+        "Keep responses concise.\n<enki:agentic-loop>\n- Think briefly.\n- Call tools only after planning.\n</enki:agentic-loop>",
+    );
+
+    assert_eq!(preamble, "Keep responses concise.");
+    assert_eq!(
+        agentic_loop,
+        "- Think briefly.\n- Call tools only after planning."
+    );
+}
+
 #[tokio::test]
 async fn reloads_previous_session_messages_before_next_request() {
     let home = temp_home("resume");
