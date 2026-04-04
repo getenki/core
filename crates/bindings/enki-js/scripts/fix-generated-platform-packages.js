@@ -5,6 +5,22 @@ const path = require('node:path')
 
 const repoRoot = path.resolve(__dirname, '..')
 const npmDir = path.join(repoRoot, 'npm')
+const rootPackageJsonPath = path.join(repoRoot, 'package.json')
+
+if (fs.existsSync(rootPackageJsonPath)) {
+  const packageJson = JSON.parse(fs.readFileSync(rootPackageJsonPath, 'utf8'))
+  const version = packageJson.version
+
+  if (typeof version === 'string' && packageJson.optionalDependencies && typeof packageJson.optionalDependencies === 'object') {
+    for (const dependencyName of Object.keys(packageJson.optionalDependencies)) {
+      if (dependencyName.startsWith('@getenki/ai-')) {
+        packageJson.optionalDependencies[dependencyName] = version
+      }
+    }
+
+    fs.writeFileSync(rootPackageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
+  }
+}
 
 if (!fs.existsSync(npmDir)) {
   process.exit(0)
