@@ -55,6 +55,11 @@ const config = {
           sidebarId: "docsSidebar",
           position: "left",
           label: "Documentation"
+        },
+        {
+          to: "/docs/agent-design",
+          position: "left",
+          label: "Agent Design"
         }
       ]
     },

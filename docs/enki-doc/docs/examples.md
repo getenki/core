@@ -95,6 +95,17 @@ A larger end-to-end agent can combine:
 - safe path resolution inside the review root
 - a reusable `review_folder()` helper around `agent.run_sync()`
 
+## Support triage agent
+
+A useful production-style pattern is a support triage agent that:
+
+- classifies issue severity
+- maps the problem to a subsystem such as `billing`, `auth`, or `api`
+- uses tools to pull runbook context before answering
+- returns a concise recommendation for the human operator
+
+See [Agent Design](/docs/agent-design) for a full example of this use case and how it maps onto the Enki runtime model.
+
 ## Repository examples
 
 The repository currently includes these runnable Python examples:

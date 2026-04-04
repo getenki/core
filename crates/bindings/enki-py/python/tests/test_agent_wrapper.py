@@ -182,6 +182,25 @@ def test_wrapper_registers_concrete_tool_objects(monkeypatch):
     assert handler.execute("format_score", json.dumps({"total": 7}), "", "", "") == "score:7"
 
 
+def test_tool_handler_returns_error_string_for_invalid_args(monkeypatch):
+    monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
+    monkeypatch.setattr(agent_module, "LiteLlmProvider", FakeLiteLlmProvider)
+
+    agent = agent_module.Agent("test-model")
+
+    @agent.tool_plain
+    def classify_severity(summary: str) -> str:
+        return summary
+
+    agent.run_sync("hello")
+
+    handler = FakeEnkiAgent.last_kwargs["handler"]
+    assert (
+        handler.execute("classify_severity", "{}", "", "", "")
+        == "Error: Missing required argument 'summary' for tool 'classify_severity'"
+    )
+
+
 def test_wrapper_supports_custom_llm_provider(monkeypatch):
     monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
 
@@ -335,6 +354,48 @@ def test_litellm_provider_can_send_ollama_tools_when_enabled(monkeypatch):
             },
         }
     ]
+
+
+def test_litellm_provider_retries_empty_tool_response_without_tools(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, content: str):
+            self._content = content
+
+        def model_dump(self):
+            return {
+                "model": "openai/gpt-4o-mini",
+                "choices": [
+                    {
+                        "message": {"content": self._content},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+
+    fake_module = types.SimpleNamespace()
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        if "tools" in kwargs:
+            return FakeResponse("")
+        return FakeResponse("fallback answer")
+
+    fake_module.completion = fake_completion
+    monkeypatch.setattr(agent_module.importlib, "import_module", lambda name: fake_module)
+
+    provider = agent_module.LiteLlmProvider()
+    result = provider.complete(
+        "openai::gpt-4o-mini",
+        [{"role": "user", "content": "hello"}],
+        [{"name": "echo", "description": "Echo a value"}],
+    )
+
+    assert len(calls) == 2
+    assert "tools" in calls[0]
+    assert "tools" not in calls[1]
+    assert result["content"] == "fallback answer"
 
 
 def test_litellm_provider_normalizes_tool_messages_for_anthropic(monkeypatch):

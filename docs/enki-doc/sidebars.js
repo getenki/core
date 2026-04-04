@@ -2,6 +2,7 @@ const sidebars = {
     docsSidebar: [
         "intro",
         "builder-cli",
+        "agent-design",
         {
             type: "category",
             label: "Python",

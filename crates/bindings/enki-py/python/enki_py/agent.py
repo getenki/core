@@ -318,7 +318,19 @@ class LiteLlmProvider(LlmProviderBackend):
         payload.update(self._default_kwargs)
 
         response = litellm.completion(**payload)
-        return self._normalize_response(response, normalized_model)
+        normalized = self._normalize_response(response, normalized_model)
+
+        if "tools" in payload and self._should_retry_without_tools(normalized):
+            fallback_payload = dict(payload)
+            fallback_payload.pop("tools", None)
+            fallback_response = litellm.completion(**fallback_payload)
+            fallback_normalized = self._normalize_response(
+                fallback_response, normalized_model
+            )
+            if not self._should_retry_without_tools(fallback_normalized):
+                return fallback_normalized
+
+        return normalized
 
     @staticmethod
     def _normalize_model(model: str) -> tuple[str | None, str]:
@@ -412,6 +424,10 @@ class LiteLlmProvider(LlmProviderBackend):
             },
         }
 
+    @staticmethod
+    def _should_retry_without_tools(response: dict[str, Any]) -> bool:
+        return not (response.get("content") or "").strip() and not response.get("tool_calls")
+
     @classmethod
     def _normalize_response(cls, response: Any, model: str) -> dict[str, Any]:
         if hasattr(response, "model_dump"):
@@ -493,44 +509,47 @@ class _PythonToolHandler(EnkiToolHandler):
             workspace_dir: str,
             sessions_dir: str,
     ) -> str:
-        tool = self._tools[tool_name]
-        parsed_args = json.loads(args_json) if args_json else {}
-        if parsed_args is None:
-            parsed_args = {}
-        if not isinstance(parsed_args, dict):
-            raise TypeError(f"Tool '{tool_name}' expected JSON object args")
+        try:
+            tool = self._tools[tool_name]
+            parsed_args = json.loads(args_json) if args_json else {}
+            if parsed_args is None:
+                parsed_args = {}
+            if not isinstance(parsed_args, dict):
+                raise TypeError(f"Tool '{tool_name}' expected JSON object args")
 
-        bound_args = []
-        if tool.uses_context:
-            with self._deps_lock:
-                deps = self._current_deps
-            bound_args.append(RunContext(deps=deps))
+            bound_args = []
+            if tool.uses_context:
+                with self._deps_lock:
+                    deps = self._current_deps
+                bound_args.append(RunContext(deps=deps))
 
-        signature = inspect.signature(tool.func)
-        parameters = list(signature.parameters.values())
-        if tool.uses_context and parameters:
-            parameters = parameters[1:]
+            signature = inspect.signature(tool.func)
+            parameters = list(signature.parameters.values())
+            if tool.uses_context and parameters:
+                parameters = parameters[1:]
 
-        for parameter in parameters:
-            if parameter.kind not in (
-                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    inspect.Parameter.KEYWORD_ONLY,
-            ):
-                raise TypeError(
-                    f"Tool '{tool_name}' uses unsupported parameter kind: {parameter.kind}"
-                )
+            for parameter in parameters:
+                if parameter.kind not in (
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        inspect.Parameter.KEYWORD_ONLY,
+                ):
+                    raise TypeError(
+                        f"Tool '{tool_name}' uses unsupported parameter kind: {parameter.kind}"
+                    )
 
-            if parameter.name in parsed_args:
-                bound_args.append(parsed_args[parameter.name])
-            elif parameter.default is not inspect._empty:
-                bound_args.append(parameter.default)
-            else:
-                raise TypeError(
-                    f"Missing required argument '{parameter.name}' for tool '{tool_name}'"
-                )
+                if parameter.name in parsed_args:
+                    bound_args.append(parsed_args[parameter.name])
+                elif parameter.default is not inspect._empty:
+                    bound_args.append(parameter.default)
+                else:
+                    raise TypeError(
+                        f"Missing required argument '{parameter.name}' for tool '{tool_name}'"
+                    )
 
-        result = _resolve_callback_result(tool.func(*bound_args))
-        return _stringify_tool_result(result)
+            result = _resolve_callback_result(tool.func(*bound_args))
+            return _stringify_tool_result(result)
+        except Exception as error:
+            return f"Error: {error}"
 
 
 class _PythonMemoryHandler(EnkiMemoryHandler):

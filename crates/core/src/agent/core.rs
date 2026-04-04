@@ -697,6 +697,10 @@ Current task workspace: {}
             .unwrap_or("")
             .to_string();
 
+        if content.trim().is_empty() {
+            return Err("Model returned an empty response with no tool calls.".to_string());
+        }
+
         Ok(StepOutcome::Final(content))
     }
 

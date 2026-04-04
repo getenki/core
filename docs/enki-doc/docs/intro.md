@@ -13,6 +13,7 @@ This site tracks the current `core-next` workspace:
 - [JavaScript](/docs/javascript): the published `@getenki/ai` native Node.js package with single-agent and multi-agent runtimes
 - [Rust](/docs/rust): the core runtime workspace, crate layout, execution tracing, and local build workflow
 - [Builder CLI](/docs/builder-cli): manifest-driven project scaffolding, execution, monitoring, and interactive sessions
+- [Agent Design](/docs/agent-design): the runtime architecture, state machine, binding strategy, and multi-agent design model
 
 ## Choose your entry point
 

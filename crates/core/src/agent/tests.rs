@@ -483,3 +483,64 @@ async fn detailed_run_traces_tool_call_minor_steps() {
             && step.detail.contains("echo:hello")
     }));
 }
+
+#[tokio::test]
+async fn retries_when_model_returns_empty_final_response_after_tool_call() {
+    let home = temp_home("empty-final-retry");
+    let llm = RecordingLlm::new(vec![
+        LlmResponse {
+            content: String::new(),
+            usage: None,
+            tool_calls: vec![
+                json!({
+                    "id": "call-1",
+                    "function": {
+                        "name": "echo",
+                        "arguments": "{\"value\":\"hello\"}"
+                    }
+                })
+                .to_string(),
+            ],
+            model: "recording".to_string(),
+            finish_reason: Some("tool_calls".to_string()),
+        },
+        LlmResponse {
+            content: String::new(),
+            usage: None,
+            tool_calls: Vec::new(),
+            model: "recording".to_string(),
+            finish_reason: Some("stop".to_string()),
+        },
+        LlmResponse {
+            content: "done".to_string(),
+            usage: None,
+            tool_calls: Vec::new(),
+            model: "recording".to_string(),
+            finish_reason: Some("stop".to_string()),
+        },
+    ]);
+
+    let tool_registry = ToolRegistryBuilder::new().register(EchoTool).build();
+
+    let agent = Agent::with_definition_tool_registry_executor_llm_and_workspace(
+        AgentDefinition::default(),
+        tool_registry,
+        Box::new(crate::tooling::tool_calling::RegistryToolExecutor),
+        Some(Box::new(llm.clone())),
+        None,
+        Some(home),
+    )
+    .await
+    .unwrap();
+
+    let result = agent.run_detailed("session-a", "hello", None).await;
+
+    assert_eq!(result.content, "done");
+    assert!(result.steps.iter().any(|step| {
+        step.kind == "retry"
+            && step
+                .detail
+                .contains("Model returned an empty response with no tool calls.")
+    }));
+    assert_eq!(llm.calls().len(), 3);
+}
