@@ -445,6 +445,7 @@ impl NativeEnkiAgent {
   }
 
   #[napi(factory, js_name = "withTools")]
+  #[allow(clippy::too_many_arguments)]
   pub fn with_tools(
     name: Option<String>,
     system_prompt_preamble: Option<String>,
