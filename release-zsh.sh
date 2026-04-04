@@ -43,7 +43,7 @@ UPDATED_FILES=()
 echo "Preparing macOS release for version $VERSION..."
 
 if should_update "rs"; then
-  replace_first_match "Cargo.toml" '^version = ".*?"' "version = \"$VERSION\""
+  replace_first_match "Cargo.toml" '(\[workspace\.package\][\s\S]*?^version = ").*?(")' "\${1}$VERSION\${2}"
   cargo generate-lockfile
   UPDATED_FILES+=("Cargo.toml" "Cargo.lock")
   echo "Updated Cargo.toml"
@@ -60,7 +60,7 @@ if should_update "js"; then
 fi
 
 if should_update "py"; then
-  replace_first_match "crates/bindings/enki-py/Cargo.toml" '^version = ".*?"' "version = \"$VERSION\""
+  replace_first_match "crates/bindings/enki-py/Cargo.toml" '(\[package\][\s\S]*?^version = ").*?(")' "\${1}$VERSION\${2}"
   cargo generate-lockfile
   UPDATED_FILES+=("crates/bindings/enki-py/Cargo.toml" "Cargo.lock")
   echo "Updated crates/bindings/enki-py/Cargo.toml for Python"

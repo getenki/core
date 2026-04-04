@@ -66,18 +66,18 @@ function Get-SelectedTargets {
     param([string]$RawTargets)
 
     if ([string]::IsNullOrWhiteSpace($RawTargets)) {
-        return @()
+        return [string[]]@()
     }
 
-    $selected = $RawTargets.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    [string[]]$selected = @($RawTargets.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     $valid = @("js", "py", "rs")
-    $invalid = $selected | Where-Object { $_ -notin $valid }
+    [string[]]$invalid = @($selected | Where-Object { $_ -notin $valid })
 
     if ($invalid.Count -gt 0) {
         throw "Invalid target(s): $($invalid -join ', '). Valid targets are: js, py, rs."
     }
 
-    return $selected
+    return [string[]]$selected
 }
 
 function Should-Update {
@@ -86,7 +86,8 @@ function Should-Update {
         [string]$Target
     )
 
-    return $SelectedTargets.Count -eq 0 -or $Target -in $SelectedTargets
+    $normalizedTargets = @($SelectedTargets)
+    return $normalizedTargets.Count -eq 0 -or $Target -in $normalizedTargets
 }
 
 if ($Help -or $Version -eq "--help") {
@@ -99,7 +100,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     exit 1
 }
 
-$selectedTargets = Get-SelectedTargets -RawTargets $Targets
+$selectedTargets = @(Get-SelectedTargets -RawTargets $Targets)
 $dirty = & git status --porcelain
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to inspect git status."
@@ -157,7 +158,7 @@ else {
     Invoke-External git commit -m "chore: release $Version ($Targets)"
 }
 
-if ($selectedTargets.Count -eq 0) {
+if (@($selectedTargets).Count -eq 0) {
     Invoke-External git tag "v$Version"
     Write-Host "Created global tag: v$Version"
 }

@@ -35,7 +35,7 @@ echo "🚀 Preparing release for version $VERSION..."
 
 # 2. Update Manifests (Adjust paths if files are in subfolders)
 if should_update "rs"; then
-  sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" Cargo.toml
+  perl -0pi -e "s/(\[workspace\.package\][\s\S]*?^version = \").*?(\")/\${1}$VERSION\${2}/m" Cargo.toml
   cargo generate-lockfile
   UPDATED_FILES+=" Cargo.toml Cargo.lock"
   echo "✅ Updated Cargo.toml"
@@ -48,7 +48,7 @@ if should_update "js"; then
 fi
 
 if should_update "py"; then
-  sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" crates/bindings/enki-py/Cargo.toml
+  perl -0pi -e "s/(\[package\][\s\S]*?^version = \").*?(\")/\${1}$VERSION\${2}/m" crates/bindings/enki-py/Cargo.toml
   cargo generate-lockfile
   UPDATED_FILES+=" crates/bindings/enki-py/Cargo.toml Cargo.lock"
   echo "✅ Updated crates/bindings/enki-py/Cargo.toml for Python"
