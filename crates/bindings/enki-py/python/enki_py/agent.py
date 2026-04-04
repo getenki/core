@@ -294,7 +294,7 @@ class LiteLlmProvider(LlmProviderBackend):
             litellm = importlib.import_module("litellm")
         except ModuleNotFoundError as error:
             raise RuntimeError(
-                "LiteLLM is not installed. Install it with `pip install litellm` "
+                "LiteLLM is not installed. Install it with `pip install enki-py[litellm]` "
                 "or pass a custom `llm=` provider."
             ) from error
 

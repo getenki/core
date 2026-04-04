@@ -16,6 +16,9 @@ dependencies = []
 litellm = [
     "litellm",
 ]
+llm = [
+    "litellm",
+]
 default-llm = [
     "litellm",
 ]

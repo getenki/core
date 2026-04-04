@@ -446,6 +446,6 @@ def test_litellm_provider_missing_dependency_returns_error_message(monkeypatch):
     result = agent.run_sync("hello")
 
     assert result.output == (
-        "LLM provider error: LiteLLM is not installed. Install it with `pip install litellm` "
+        "LLM provider error: LiteLLM is not installed. Install it with `pip install enki-py[litellm]` "
         "or pass a custom `llm=` provider."
     )
