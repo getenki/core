@@ -49,7 +49,11 @@ function Replace-FirstMatch {
     )
 
     $content = Get-Content -Raw -Path $Path
-    $updated = [regex]::Replace($content, $Pattern, $Replacement, 1, [System.Text.RegularExpressions.RegexOptions]::Multiline)
+    $regex = [System.Text.RegularExpressions.Regex]::new(
+        $Pattern,
+        [System.Text.RegularExpressions.RegexOptions]::Multiline
+    )
+    $updated = $regex.Replace($content, $Replacement, 1)
 
     if ($content -eq $updated) {
         throw "No match found in $Path for pattern: $Pattern"
@@ -110,7 +114,7 @@ $updatedFiles = [System.Collections.Generic.List[string]]::new()
 Write-Host "Preparing release for version $Version..."
 
 if (Should-Update -SelectedTargets $selectedTargets -Target "rs") {
-    Replace-FirstMatch -Path "Cargo.toml" -Pattern '^version = ".*?"' -Replacement "version = `"$Version`""
+    Replace-FirstMatch -Path "Cargo.toml" -Pattern '(?ms)(^\[workspace\.package\]\r?\n(?:.*\r?\n)*?^version = ").*?(")' -Replacement "`${1}$Version`${2}"
     Invoke-External cargo generate-lockfile
     $updatedFiles.Add("Cargo.toml")
     $updatedFiles.Add("Cargo.lock")
@@ -133,7 +137,7 @@ if (Should-Update -SelectedTargets $selectedTargets -Target "js") {
 }
 
 if (Should-Update -SelectedTargets $selectedTargets -Target "py") {
-    Replace-FirstMatch -Path "crates/bindings/enki-py/Cargo.toml" -Pattern '^version = ".*?"' -Replacement "version = `"$Version`""
+    Replace-FirstMatch -Path "crates/bindings/enki-py/Cargo.toml" -Pattern '(?ms)(^\[package\]\r?\n(?:.*\r?\n)*?^version = ").*?(")' -Replacement "`${1}$Version`${2}"
     Invoke-External cargo generate-lockfile
     $updatedFiles.Add("crates/bindings/enki-py/Cargo.toml")
     $updatedFiles.Add("Cargo.lock")
