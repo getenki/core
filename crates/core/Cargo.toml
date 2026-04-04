@@ -22,5 +22,5 @@ llm = { workspace = true, optional = true }
 tokio.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2.17", features = ["js"] }
-tokio = { version = "1.50.0", features = ["sync"] }
+getrandom = { version = "0.4.2", features = ["wasm_js", "std"] }
+tokio = { version = "1.51.0", features = ["sync"] }

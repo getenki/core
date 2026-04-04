@@ -630,6 +630,10 @@ litellm = [
     { name = "litellm", version = "1.80.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "litellm", version = "1.82.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
 ]
+llm = [
+    { name = "litellm", version = "1.80.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "litellm", version = "1.82.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+]
 tests = [
     { name = "pytest", version = "8.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
@@ -640,9 +644,10 @@ tests = [
 requires-dist = [
     { name = "litellm", marker = "extra == 'default-llm'" },
     { name = "litellm", marker = "extra == 'litellm'" },
+    { name = "litellm", marker = "extra == 'llm'" },
     { name = "pytest", marker = "extra == 'tests'" },
 ]
-provides-extras = ["default-llm", "litellm", "tests"]
+provides-extras = ["default-llm", "litellm", "llm", "tests"]
 
 [[package]]
 name = "exceptiongroup"
