@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "core"
-version = "0.4.10"
+version = "0.4.12"
 dependencies = [
  "async-trait",
  "futures",
@@ -395,7 +395,7 @@ dependencies = [
 
 [[package]]
 name = "enki-cli"
-version = "0.4.10"
+version = "0.4.12"
 dependencies = [
  "clap",
  "core",
@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "enki-py"
-version = "0.4.10"
+version = "0.4.12"
 dependencies = [
  "async-trait",
  "core",
@@ -421,7 +421,7 @@ dependencies = [
 
 [[package]]
 name = "enki_js"
-version = "0.4.10"
+version = "0.4.12"
 dependencies = [
  "async-trait",
  "core",
