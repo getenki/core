@@ -30,6 +30,8 @@ function Invoke-External {
         [string[]]$ArgumentList
     )
 
+    $renderedArgs = if ($ArgumentList.Count -gt 0) { $ArgumentList -join " " } else { "" }
+    Write-Host ">> $FilePath $renderedArgs".TrimEnd()
     & $FilePath @ArgumentList
     if ($LASTEXITCODE -ne 0) {
         throw "Command failed: $FilePath $($ArgumentList -join ' ')"
@@ -149,8 +151,10 @@ if ($updatedFiles.Count -eq 0) {
     throw "No files selected for update."
 }
 
+Write-Host "Staging release files..."
 Invoke-External git add @updatedFiles
 
+Write-Host "Creating release commit..."
 if ([string]::IsNullOrWhiteSpace($Targets)) {
     Invoke-External git commit -m "chore: release $Version"
 }
@@ -159,11 +163,13 @@ else {
 }
 
 if (@($selectedTargets).Count -eq 0) {
+    Write-Host "Creating global release tag..."
     Invoke-External git tag "v$Version"
     Write-Host "Created global tag: v$Version"
 }
 else {
     foreach ($target in $selectedTargets) {
+        Write-Host "Creating selective release tag for $target..."
         Invoke-External git tag "$target-v$Version"
         Write-Host "Created selective tag: $target-v$Version"
     }
@@ -174,5 +180,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to determine current branch."
 }
 
+Write-Host "Pushing commit and tags to origin/$currentBranch..."
 Invoke-External git push origin $currentBranch --tags
 Write-Host "Release $Version dispatched to GitHub from branch $currentBranch"
