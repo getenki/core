@@ -45,6 +45,26 @@ The loop converts each model response into a directive:
 
 This is what lets Enki enforce retry budgets, bound iterations, and emit consistent step traces.
 
+## Custom loop instructions
+
+The runtime also allows the default loop prompt to be overridden per agent without changing the Rust state machine itself. Enki parses a tagged block from the agent's instruction preamble:
+
+```text
+Keep responses concise.
+<enki:agentic-loop>
+- Think briefly.
+- Call tools only after planning.
+</enki:agentic-loop>
+```
+
+At runtime:
+
+- text outside the block stays in the normal system prompt preamble
+- text inside the block replaces Enki's default agentic loop instructions
+- if the block is missing, empty, or malformed, Enki falls back to the default loop prompt
+
+This gives SDK users a controlled way to tune how the model interprets the loop while still keeping iteration limits, phase transitions, retries, and tool execution inside the Rust runtime.
+
 ## Runtime primitives
 
 Every agent is composed from the same runtime building blocks:
@@ -91,16 +111,13 @@ The practical benefit is that tool calls, retries, and finalization are visible 
 
 The `enki` builder CLI sits above the runtime and turns project manifests into runnable agent systems. It does not replace the core agent design. It packages configuration, discovers environments, and launches the same underlying runtime for local development workflows.
 
-## Example agent use case
+## Example agents
 
-One practical use case is a support triage agent that classifies an incoming issue, checks internal runbooks, and proposes the next action for the human team.
+These examples show different ways to combine the same Rust loop with different instruction styles and tool sets.
 
-In this design:
+### Support triage agent
 
-- the agent owns the conversation and response format
-- tools fetch structured operational context
-- memory can preserve recent customer incidents across the same session
-- execution steps make it easy to audit why the recommendation was produced
+This pattern fits operational workflows where the model should gather context before making claims.
 
 ```python
 from enki_py import Agent
@@ -146,7 +163,74 @@ result = agent.run_sync(
 print(result.output)
 ```
 
-This kind of agent is a good fit for Enki because the reasoning loop stays in Rust, while the domain-specific logic stays in normal Python tools that your team can update quickly.
+### Research agent with custom loop instructions
+
+This pattern is useful when the model should always plan first, then gather evidence before answering.
+
+```python
+from enki_py import Agent
+
+agent = Agent(
+    "openai::gpt-4o",
+    name="Research Agent",
+    instructions="""
+You summarize technical topics for engineers.
+<enki:agentic-loop>
+- Restate the question internally before acting.
+- Prefer collecting evidence with tools before answering.
+- If sources conflict, call that out explicitly in the final response.
+</enki:agentic-loop>
+""",
+)
+
+
+@agent.tool_plain
+def lookup_note(topic: str) -> str:
+    """Return a short internal research note."""
+    notes = {
+        "tokio": "Tokio is an async runtime for Rust with task scheduling, IO, and timers.",
+        "pyo3": "PyO3 exposes Rust types and functions to Python through CPython bindings.",
+    }
+    return notes.get(topic.lower(), "No note found.")
+
+
+print(agent.run_sync("Summarize Tokio for a backend engineer.").output)
+```
+
+### File-oriented workspace agent
+
+This pattern works well for agents that iterate over artifacts in the task workspace and produce a concrete output.
+
+```python
+from enki_py import Agent
+
+agent = Agent(
+    "openai::gpt-4o",
+    name="Release Notes Agent",
+    instructions=(
+        "You prepare release notes from workspace artifacts. "
+        "Read source material before drafting. "
+        "Write the final markdown only when the summary is complete."
+    ),
+)
+
+
+@agent.tool_plain
+def list_changes() -> str:
+    """Return a simplified changelog feed."""
+    return "- Added multi-agent registry support.\n- Improved execution step tracing.\n- Fixed retry handling in recovery."
+
+
+@agent.tool_plain
+def write_release_notes(content: str) -> str:
+    """Pretend to write release notes."""
+    return f"release-notes.md updated with {len(content)} characters"
+
+
+print(agent.run_sync("Draft release notes for the latest internal build.").output)
+```
+
+All three examples keep the same Enki runtime guarantees: the Rust loop owns phase transitions, retries, and step tracing, while the SDK layer defines agent behavior through instructions, tools, and callbacks.
 
 ## Related docs
 
