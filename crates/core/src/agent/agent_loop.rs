@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::agent::core::Agent;
-use crate::agent::types::{AgentRunResult, ExecutionStep, StepOutcome, ToolCallTrace};
+use crate::agent::types::{
+    AgentExecutionContext, AgentRunResult, ExecutionStep, StepOutcome, ToolCallTrace,
+};
 use crate::message::{Message, next_request_id};
 use crate::tooling::types::{AskHumanFn, ToolContext};
 use std::sync::Arc;
@@ -16,7 +18,35 @@ pub trait AgentLoop {
         session_id: &str,
         user_message: &str,
         on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
-    ) -> AgentRunResult;
+    ) -> AgentRunResult {
+        self.run_detailed_with_context(
+            agent,
+            session_id,
+            user_message,
+            AgentExecutionContext::default(),
+            on_step,
+        )
+        .await
+    }
+
+    async fn run_detailed_with_context(
+        &self,
+        agent: &Agent,
+        session_id: &str,
+        user_message: &str,
+        exec_ctx: AgentExecutionContext,
+        on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
+    ) -> AgentRunResult {
+        self.run_detailed_with_human_and_context(
+            agent,
+            session_id,
+            user_message,
+            exec_ctx,
+            on_step,
+            None,
+        )
+        .await
+    }
 
     /// Like `run_detailed`, but also injects an `AskHumanFn` into the
     /// tool context so tools can pause for human input.
@@ -26,10 +56,29 @@ pub trait AgentLoop {
         session_id: &str,
         user_message: &str,
         on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
+        human: Option<Arc<dyn AskHumanFn>>,
+    ) -> AgentRunResult {
+        self.run_detailed_with_human_and_context(
+            agent,
+            session_id,
+            user_message,
+            AgentExecutionContext::default(),
+            on_step,
+            human,
+        )
+        .await
+    }
+
+    async fn run_detailed_with_human_and_context(
+        &self,
+        agent: &Agent,
+        session_id: &str,
+        user_message: &str,
+        exec_ctx: AgentExecutionContext,
+        on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
         _human: Option<Arc<dyn AskHumanFn>>,
     ) -> AgentRunResult {
-        // Default: ignore human context.
-        self.run_detailed(agent, session_id, user_message, on_step)
+        self.run_detailed_with_context(agent, session_id, user_message, exec_ctx, on_step)
             .await
     }
 
@@ -187,8 +236,13 @@ impl DefaultAgentLoop {
         agent: &Agent,
         session_id: &str,
         user_message: &str,
+        exec_ctx: &AgentExecutionContext,
     ) -> Result<Vec<Message>, String> {
-        let ctx = agent.workspace.tool_context(session_id);
+        let ctx = agent.workspace.tool_context_with_options(
+            session_id,
+            exec_ctx.workspace_dir.clone(),
+            exec_ctx.workflow.clone(),
+        );
 
         #[cfg(not(target_arch = "wasm32"))]
         if let Err(e) = tokio::fs::create_dir_all(&ctx.workspace_dir).await {
@@ -330,31 +384,25 @@ impl DefaultAgentLoop {
 
 #[async_trait(?Send)]
 impl AgentLoop for DefaultAgentLoop {
-    async fn run_detailed(
+    async fn run_detailed_with_human_and_context(
         &self,
         agent: &Agent,
         session_id: &str,
         user_message: &str,
-        on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
-    ) -> AgentRunResult {
-        self.run_detailed_with_human(agent, session_id, user_message, on_step, None)
-            .await
-    }
-
-    async fn run_detailed_with_human(
-        &self,
-        agent: &Agent,
-        session_id: &str,
-        user_message: &str,
+        exec_ctx: AgentExecutionContext,
         on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
         human: Option<Arc<dyn AskHumanFn>>,
     ) -> AgentRunResult {
-        let mut ctx = agent.workspace.tool_context(session_id);
+        let mut ctx = agent.workspace.tool_context_with_options(
+            session_id,
+            exec_ctx.workspace_dir.clone(),
+            exec_ctx.workflow.clone(),
+        );
         ctx.human = human;
         let mut steps = Vec::new();
 
         let mut messages = match self
-            .initialize_messages(agent, session_id, user_message)
+            .initialize_messages(agent, session_id, user_message, &exec_ctx)
             .await
         {
             Ok(messages) => messages,

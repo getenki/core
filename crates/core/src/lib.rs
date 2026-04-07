@@ -8,3 +8,4 @@ pub mod message;
 pub mod registry;
 pub mod runtime;
 pub mod tooling;
+pub mod workflow;

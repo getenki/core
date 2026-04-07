@@ -1,4 +1,6 @@
+use crate::tooling::types::WorkflowToolContext;
 use serde_json::Value;
+use std::path::PathBuf;
 
 // Config
 const DEFAULT_MAX_ITERATIONS: usize = 20;
@@ -19,6 +21,12 @@ impl Default for AgentDefinition {
             max_iterations: DEFAULT_MAX_ITERATIONS,
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentExecutionContext {
+    pub workspace_dir: Option<PathBuf>,
+    pub workflow: Option<WorkflowToolContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

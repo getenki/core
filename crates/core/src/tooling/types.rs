@@ -1,6 +1,7 @@
 use crate::registry::AgentRegistry;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -15,6 +16,14 @@ pub trait AskHumanFn: 'static {
 
 pub type ToolRegistry = BTreeMap<String, Box<dyn Tool>>;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowToolContext {
+    pub workflow_id: String,
+    pub run_id: String,
+    pub node_id: String,
+    pub attempt: usize,
+}
+
 #[derive(Clone)]
 pub struct ToolContext {
     pub agent_dir: PathBuf,
@@ -22,6 +31,7 @@ pub struct ToolContext {
     pub sessions_dir: PathBuf,
     pub delegation: Option<DelegationContext>,
     pub human: Option<Arc<dyn AskHumanFn>>,
+    pub workflow: Option<WorkflowToolContext>,
 }
 
 /// Provides delegation capabilities to tools in a multi-agent runtime.
@@ -165,6 +175,7 @@ mod tests {
             sessions_dir: PathBuf::from("sessions"),
             delegation: None,
             human: None,
+            workflow: None,
         }
     }
 

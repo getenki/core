@@ -1,4 +1,4 @@
-use crate::tooling::types::ToolContext;
+use crate::tooling::types::{ToolContext, WorkflowToolContext};
 #[cfg(not(target_arch = "wasm32"))]
 use std::env;
 use std::path::PathBuf;
@@ -63,12 +63,22 @@ impl AgentWorkspace {
     }
 
     pub fn tool_context(&self, session_id: &str) -> ToolContext {
+        self.tool_context_with_options(session_id, None, None)
+    }
+
+    pub fn tool_context_with_options(
+        &self,
+        session_id: &str,
+        workspace_dir: Option<PathBuf>,
+        workflow: Option<WorkflowToolContext>,
+    ) -> ToolContext {
         ToolContext {
             agent_dir: self.agent_dir.clone(),
-            workspace_dir: self.task_dir(session_id),
+            workspace_dir: workspace_dir.unwrap_or_else(|| self.task_dir(session_id)),
             sessions_dir: self.sessions_dir.clone(),
             delegation: None,
             human: None,
+            workflow,
         }
     }
 }

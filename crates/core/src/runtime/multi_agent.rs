@@ -1,11 +1,13 @@
-use crate::agent::{Agent, AgentDefinition, AgentRunResult};
+use crate::agent::{Agent, AgentDefinition, AgentExecutionContext, AgentRunResult};
 use crate::llm::LlmProvider;
 use crate::memory::MemoryManager;
 use crate::registry::{AgentCard, AgentRegistry, AgentStatus, FirstMatchSelector, PeerSelector};
 use crate::tooling::delegation_tools::{DelegateTaskTool, DiscoverAgentsTool};
 use crate::tooling::tool_calling::{RegistryToolExecutor, ToolExecutor};
-use crate::tooling::types::{DelegateFn, Tool, ToolRegistry};
+use crate::tooling::types::{DelegateFn, Tool, ToolRegistry, WorkflowToolContext};
+use crate::workflow::{TaskTarget, WorkflowTaskResult, WorkflowTaskRunner};
 use async_trait::async_trait;
+use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -97,6 +99,89 @@ fn uuid_v4_simple() -> String {
     format!("{nanos:x}")
 }
 
+#[async_trait(?Send)]
+impl WorkflowTaskRunner for MultiAgentRuntime {
+    async fn run_task(
+        &self,
+        target: &TaskTarget,
+        metadata: &WorkflowToolContext,
+        workspace_dir: &std::path::Path,
+        prompt: &str,
+    ) -> Result<WorkflowTaskResult, String> {
+        let agent_id = match target {
+            TaskTarget::AgentId(agent_id) => {
+                if !self.agents.contains_key(agent_id) {
+                    return Err(format!("Workflow target agent '{}' not found.", agent_id));
+                }
+                agent_id.clone()
+            }
+            TaskTarget::Capabilities(required) => {
+                let cards = self.registry().list_all().await;
+                let mut matches = cards
+                    .into_iter()
+                    .filter(|card| card.status == AgentStatus::Online)
+                    .filter(|card| {
+                        required.iter().all(|required| {
+                            card.capabilities
+                                .iter()
+                                .any(|capability| capability == required)
+                        })
+                    })
+                    .map(|card| card.agent_id)
+                    .collect::<Vec<_>>();
+                matches.sort();
+                match matches.as_slice() {
+                    [agent_id] => agent_id.clone(),
+                    [] => {
+                        return Err(format!(
+                            "No online agent matched workflow capabilities: {}",
+                            required.join(", ")
+                        ));
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Multiple agents matched workflow capabilities {}: {}",
+                            required.join(", "),
+                            matches.join(", ")
+                        ));
+                    }
+                }
+            }
+        };
+
+        let agent = self
+            .agents
+            .get(&agent_id)
+            .ok_or_else(|| format!("Workflow target agent '{}' not found.", agent_id))?;
+        let session_id = format!(
+            "wf-{}-{}-attempt-{}",
+            metadata.run_id, metadata.node_id, metadata.attempt
+        );
+        let result = agent
+            .run_detailed_with_context(
+                &session_id,
+                prompt,
+                AgentExecutionContext {
+                    workspace_dir: Some(workspace_dir.to_path_buf()),
+                    workflow: Some(metadata.clone()),
+                },
+                None,
+            )
+            .await;
+
+        Ok(WorkflowTaskResult {
+            content: result.content.clone(),
+            value: json!({
+                "content": result.content,
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "attempt": metadata.attempt,
+            }),
+            agent_id,
+            steps: result.steps,
+        })
+    }
+}
 // ---------------------------------------------------------------------------
 // MultiAgentRuntimeBuilder
 // ---------------------------------------------------------------------------
