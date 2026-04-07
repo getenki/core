@@ -33,6 +33,8 @@ pub enum Command {
     Monitor(MonitorArgs),
     /// Interactive human-in-the-loop REPL
     Join(JoinArgs),
+    /// Manage workflow runs and definitions
+    Workflow(WorkflowArgs),
     /// Manage agent configurations
     Agent(AgentArgs),
 }
@@ -171,4 +173,79 @@ pub struct AddAgentArgs {
     /// Generate a boilerplate python script for the agent
     #[arg(long, default_value_t = false)]
     pub script: bool,
+}
+
+#[derive(Parser)]
+pub struct WorkflowArgs {
+    #[command(subcommand)]
+    pub command: WorkflowCommand,
+}
+
+#[derive(Subcommand)]
+pub enum WorkflowCommand {
+    /// List workflows defined in enki.toml
+    List(WorkflowListArgs),
+    /// Start a workflow run
+    Run(WorkflowRunArgs),
+    /// Inspect a persisted workflow run
+    Inspect(WorkflowInspectArgs),
+    /// Resume a paused or interrupted workflow run
+    Resume(WorkflowResumeArgs),
+    /// Interactively respond to workflow interventions
+    Join(WorkflowJoinArgs),
+}
+
+#[derive(Parser)]
+pub struct WorkflowListArgs {
+    /// Path to enki.toml manifest
+    #[arg(long, default_value = "./enki.toml")]
+    pub manifest: PathBuf,
+}
+
+#[derive(Parser)]
+pub struct WorkflowRunArgs {
+    /// Path to enki.toml manifest
+    #[arg(long, default_value = "./enki.toml")]
+    pub manifest: PathBuf,
+
+    /// Workflow ID to start
+    #[arg(long)]
+    pub workflow: String,
+
+    /// JSON input payload, or a plain string that will become {"message": "..."}
+    #[arg(long, default_value = "{}")]
+    pub input: String,
+}
+
+#[derive(Parser)]
+pub struct WorkflowInspectArgs {
+    /// Path to enki.toml manifest
+    #[arg(long, default_value = "./enki.toml")]
+    pub manifest: PathBuf,
+
+    /// Workflow run ID to inspect
+    #[arg(long)]
+    pub run: String,
+}
+
+#[derive(Parser)]
+pub struct WorkflowResumeArgs {
+    /// Path to enki.toml manifest
+    #[arg(long, default_value = "./enki.toml")]
+    pub manifest: PathBuf,
+
+    /// Workflow run ID to resume
+    #[arg(long)]
+    pub run: String,
+}
+
+#[derive(Parser)]
+pub struct WorkflowJoinArgs {
+    /// Path to enki.toml manifest
+    #[arg(long, default_value = "./enki.toml")]
+    pub manifest: PathBuf,
+
+    /// Workflow run ID to join for intervention handling
+    #[arg(long)]
+    pub run: String,
 }

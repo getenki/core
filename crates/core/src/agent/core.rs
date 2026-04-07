@@ -9,7 +9,8 @@ use serde_json::Value;
 
 use crate::agent::agent_loop::{AgentLoop, DefaultAgentLoop};
 use crate::agent::types::{
-    AgentDefinition, AgentRunResult, StepOutcome, ToolCallTrace, ToolInvocation,
+    AgentDefinition, AgentExecutionContext, AgentRunResult, StepOutcome, ToolCallTrace,
+    ToolInvocation,
 };
 use crate::agent::workspace::AgentWorkspace;
 #[cfg(all(not(target_arch = "wasm32"), feature = "universal-llm-provider"))]
@@ -719,6 +720,17 @@ Current task workspace: {}
             .await
     }
 
+    pub async fn run_detailed_with_context(
+        &self,
+        session_id: &str,
+        user_message: &str,
+        exec_ctx: AgentExecutionContext,
+        on_step: Option<std::sync::Arc<dyn Fn(crate::agent::types::ExecutionStep) + Send + Sync>>,
+    ) -> AgentRunResult {
+        self.agent_loop
+            .run_detailed_with_context(self, session_id, user_message, exec_ctx, on_step)
+            .await
+    }
     pub async fn run_detailed_with_human(
         &self,
         session_id: &str,
@@ -728,6 +740,25 @@ Current task workspace: {}
     ) -> AgentRunResult {
         self.agent_loop
             .run_detailed_with_human(self, session_id, user_message, on_step, human)
+            .await
+    }
+    pub async fn run_detailed_with_human_and_context(
+        &self,
+        session_id: &str,
+        user_message: &str,
+        exec_ctx: AgentExecutionContext,
+        on_step: Option<std::sync::Arc<dyn Fn(crate::agent::types::ExecutionStep) + Send + Sync>>,
+        human: Option<std::sync::Arc<dyn crate::tooling::types::AskHumanFn>>,
+    ) -> AgentRunResult {
+        self.agent_loop
+            .run_detailed_with_human_and_context(
+                self,
+                session_id,
+                user_message,
+                exec_ctx,
+                on_step,
+                human,
+            )
             .await
     }
 }

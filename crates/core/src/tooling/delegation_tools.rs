@@ -176,6 +176,7 @@ mod tests {
             sessions_dir: PathBuf::from("sessions"),
             delegation,
             human: None,
+            workflow: None,
         }
     }
 

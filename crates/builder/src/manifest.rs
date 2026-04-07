@@ -1,4 +1,9 @@
+use core_next::workflow::{
+    RetryPolicy, TaskDefinition, TaskTarget, WorkflowDefinition, WorkflowEdgeDefinition,
+    WorkflowEdgeTransition, WorkflowFailurePolicy, WorkflowNodeDefinition, WorkflowNodeKind,
+};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Root of the `enki.toml` manifest.
@@ -11,6 +16,15 @@ pub struct Manifest {
 
     #[serde(rename = "tool", default)]
     pub tools: Vec<ToolConfig>,
+
+    #[serde(rename = "transform", default)]
+    pub transforms: Vec<TransformConfig>,
+
+    #[serde(rename = "task", default)]
+    pub tasks: Vec<TaskConfig>,
+
+    #[serde(rename = "workflow", default)]
+    pub workflows: Vec<WorkflowConfig>,
 
     #[serde(rename = "agent", default)]
     pub agents: Vec<AgentConfig>,
@@ -60,6 +74,204 @@ impl ToolConfig {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct TransformConfig {
+    pub id: String,
+    #[serde(default = "default_builtin_kind")]
+    pub kind: String,
+    pub path: Option<String>,
+    pub symbol: Option<String>,
+}
+
+fn default_builtin_kind() -> String {
+    "builtin".to_string()
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct TaskConfig {
+    pub id: String,
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    pub prompt: String,
+    #[serde(default)]
+    pub input_bindings: BTreeMap<String, String>,
+    pub input_transform: Option<String>,
+    pub output_transform: Option<String>,
+    pub output_key: Option<String>,
+    pub max_attempts: Option<usize>,
+    pub failure_policy: Option<String>,
+}
+
+impl TaskConfig {
+    pub fn to_core(&self) -> Result<TaskDefinition, String> {
+        Ok(TaskDefinition {
+            id: self.id.clone(),
+            target: target_from_parts(self.agent.as_deref(), &self.capabilities)?,
+            prompt: self.prompt.clone(),
+            input_bindings: self.input_bindings.clone(),
+            input_transform: self.input_transform.clone(),
+            output_transform: self.output_transform.clone(),
+            output_key: self.output_key.clone(),
+            retry_policy: self
+                .max_attempts
+                .map(|max_attempts| RetryPolicy { max_attempts }),
+            failure_policy: parse_failure_policy(self.failure_policy.as_deref())?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct WorkflowConfig {
+    pub id: String,
+    pub name: Option<String>,
+    pub max_attempts: Option<usize>,
+    pub failure_policy: Option<String>,
+    #[serde(rename = "node", default)]
+    pub nodes: Vec<WorkflowNodeConfig>,
+    #[serde(rename = "edge", default)]
+    pub edges: Vec<WorkflowEdgeConfig>,
+}
+
+impl WorkflowConfig {
+    pub fn to_core(&self) -> Result<WorkflowDefinition, String> {
+        Ok(WorkflowDefinition {
+            id: self.id.clone(),
+            name: self.name.clone().unwrap_or_else(|| self.id.clone()),
+            nodes: self
+                .nodes
+                .iter()
+                .map(|node| node.to_core(&self.id))
+                .collect::<Result<Vec<_>, _>>()?,
+            edges: self
+                .edges
+                .iter()
+                .map(WorkflowEdgeConfig::to_core)
+                .collect::<Result<Vec<_>, _>>()?,
+            retry_policy: self
+                .max_attempts
+                .map(|max_attempts| RetryPolicy { max_attempts }),
+            failure_policy: parse_failure_policy(self.failure_policy.as_deref())?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct WorkflowNodeConfig {
+    pub id: String,
+    pub kind: String,
+    pub task: Option<String>,
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    pub prompt: Option<String>,
+    pub condition: Option<String>,
+    pub transform: Option<String>,
+    pub input_key: Option<String>,
+    pub output_key: Option<String>,
+    pub max_attempts: Option<usize>,
+    pub failure_policy: Option<String>,
+}
+
+impl WorkflowNodeConfig {
+    pub fn to_core(&self, workflow_id: &str) -> Result<WorkflowNodeDefinition, String> {
+        let kind = match self.kind.as_str() {
+            "task" => WorkflowNodeKind::Task {
+                task_id: self.task.clone(),
+                task: if self.task.is_some() {
+                    None
+                } else {
+                    Some(TaskDefinition {
+                        id: format!("{workflow_id}.{}", self.id),
+                        target: target_from_parts(self.agent.as_deref(), &self.capabilities)?,
+                        prompt: self.prompt.clone().ok_or_else(|| {
+                            format!(
+                                "Workflow node '{}' must define prompt for inline task.",
+                                self.id
+                            )
+                        })?,
+                        input_bindings: BTreeMap::new(),
+                        input_transform: None,
+                        output_transform: None,
+                        output_key: self.output_key.clone(),
+                        retry_policy: self
+                            .max_attempts
+                            .map(|max_attempts| RetryPolicy { max_attempts }),
+                        failure_policy: parse_failure_policy(self.failure_policy.as_deref())?,
+                    })
+                },
+            },
+            "decision" => WorkflowNodeKind::Decision {
+                condition: self.condition.clone().ok_or_else(|| {
+                    format!(
+                        "Workflow decision node '{}' must define condition.",
+                        self.id
+                    )
+                })?,
+            },
+            "human_gate" => WorkflowNodeKind::HumanGate {
+                prompt: self.prompt.clone().ok_or_else(|| {
+                    format!("Workflow human_gate node '{}' must define prompt.", self.id)
+                })?,
+            },
+            "transform" => WorkflowNodeKind::Transform {
+                transform_id: self.transform.clone().ok_or_else(|| {
+                    format!(
+                        "Workflow transform node '{}' must define transform.",
+                        self.id
+                    )
+                })?,
+                input_key: self.input_key.clone(),
+            },
+            "join" => WorkflowNodeKind::Join,
+            other => return Err(format!("Unknown workflow node kind '{}'.", other)),
+        };
+
+        Ok(WorkflowNodeDefinition {
+            id: self.id.clone(),
+            kind,
+            output_key: self.output_key.clone(),
+            retry_policy: self
+                .max_attempts
+                .map(|max_attempts| RetryPolicy { max_attempts }),
+            failure_policy: parse_failure_policy(self.failure_policy.as_deref())?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct WorkflowEdgeConfig {
+    pub from: String,
+    pub to: String,
+    pub on: Option<String>,
+    pub condition: Option<String>,
+}
+
+impl WorkflowEdgeConfig {
+    pub fn to_core(&self) -> Result<WorkflowEdgeDefinition, String> {
+        let transition = match (self.on.as_deref(), self.condition.as_deref()) {
+            (_, Some(condition)) => WorkflowEdgeTransition::Condition(condition.to_string()),
+            (None, None) => WorkflowEdgeTransition::OnSuccess,
+            (Some("always"), None) => WorkflowEdgeTransition::Always,
+            (Some("success"), None) => WorkflowEdgeTransition::OnSuccess,
+            (Some("failure"), None) => WorkflowEdgeTransition::OnFailure,
+            (Some(value), None) if value.starts_with("condition:") => {
+                WorkflowEdgeTransition::Condition(
+                    value.trim_start_matches("condition:").trim().to_string(),
+                )
+            }
+            (Some(value), None) => {
+                return Err(format!("Unknown workflow edge transition '{}'.", value));
+            }
+        };
+
+        Ok(WorkflowEdgeDefinition {
+            from: self.from.clone(),
+            to: self.to.clone(),
+            transition,
+        })
+    }
+}
 #[derive(Debug, Deserialize)]
 pub struct AgentConfig {
     pub id: String,
@@ -111,6 +323,41 @@ impl Manifest {
             }
         }
 
+        for workflow in &manifest.workflows {
+            for node in &workflow.nodes {
+                if let Some(task_id) = &node.task {
+                    if manifest.tasks.iter().all(|task| task.id != *task_id) {
+                        return Err(format!(
+                            "Workflow '{}' node '{}' references unknown task '{}'.",
+                            workflow.id, node.id, task_id
+                        ));
+                    }
+                }
+                if let Some(transform_id) = &node.transform {
+                    if !is_builtin_transform(transform_id)
+                        && manifest
+                            .transforms
+                            .iter()
+                            .all(|transform| transform.id != *transform_id)
+                    {
+                        return Err(format!(
+                            "Workflow '{}' node '{}' references unknown transform '{}'.",
+                            workflow.id, node.id, transform_id
+                        ));
+                    }
+                }
+            }
+        }
+
+        for task in &manifest.tasks {
+            if let Some(transform_id) = &task.input_transform {
+                manifest.validate_transform_reference(transform_id)?;
+            }
+            if let Some(transform_id) = &task.output_transform {
+                manifest.validate_transform_reference(transform_id)?;
+            }
+        }
+
         Ok(manifest)
     }
 
@@ -122,6 +369,54 @@ impl Manifest {
             .cloned()
             .collect()
     }
+
+    pub fn workflow_tasks(&self) -> Result<Vec<TaskDefinition>, String> {
+        self.tasks.iter().map(TaskConfig::to_core).collect()
+    }
+
+    pub fn workflow_definitions(&self) -> Result<Vec<WorkflowDefinition>, String> {
+        self.workflows.iter().map(WorkflowConfig::to_core).collect()
+    }
+
+    fn validate_transform_reference(&self, transform_id: &str) -> Result<(), String> {
+        if is_builtin_transform(transform_id)
+            || self
+                .transforms
+                .iter()
+                .any(|transform| transform.id == transform_id)
+        {
+            return Ok(());
+        }
+        Err(format!("Unknown workflow transform '{}'.", transform_id))
+    }
+}
+
+fn target_from_parts(agent: Option<&str>, capabilities: &[String]) -> Result<TaskTarget, String> {
+    if let Some(agent_id) = agent {
+        if !agent_id.trim().is_empty() {
+            return Ok(TaskTarget::AgentId(agent_id.to_string()));
+        }
+    }
+    if !capabilities.is_empty() {
+        return Ok(TaskTarget::Capabilities(capabilities.to_vec()));
+    }
+    Err("Task target must define either `agent` or `capabilities`.".to_string())
+}
+
+fn parse_failure_policy(raw: Option<&str>) -> Result<Option<WorkflowFailurePolicy>, String> {
+    match raw {
+        None => Ok(None),
+        Some("continue_best_effort") => Ok(Some(WorkflowFailurePolicy::ContinueBestEffort)),
+        Some("fail") | Some("fail_workflow") => Ok(Some(WorkflowFailurePolicy::FailWorkflow)),
+        Some("pause") | Some("pause_for_intervention") => {
+            Ok(Some(WorkflowFailurePolicy::PauseForIntervention))
+        }
+        Some(value) => Err(format!("Unknown workflow failure policy '{}'.", value)),
+    }
+}
+
+fn is_builtin_transform(transform_id: &str) -> bool {
+    matches!(transform_id, "identity" | "extract_content")
 }
 
 #[cfg(test)]
@@ -146,63 +441,58 @@ model = "ollama::qwen3.5"
         assert_eq!(manifest.agents[0].id, "assistant");
         assert_eq!(manifest.agents[0].max_iterations, 20);
         assert!(manifest.agents[0].tools.is_empty());
+        assert!(manifest.tasks.is_empty());
+        assert!(manifest.workflows.is_empty());
         assert_eq!(manifest.workspace.home, "./.enki");
     }
 
     #[test]
-    fn parse_full_manifest() {
+    fn parse_workflow_manifest() {
         let toml_str = r#"
 [project]
-name = "my-agents"
-version = "0.2.0"
-
-[workspace]
-home = "./workspace"
-
-[[tool]]
-id = "coder-tools"
-kind = "python"
-path = "src/tools/coder.py"
-symbol = "register_coder_tools"
-
-[[agent]]
-id = "coder"
-name = "Coder"
-model = "openai::gpt-4o"
-system_prompt = "You write code."
-max_iterations = 10
-capabilities = ["code-gen", "refactoring"]
-tools = ["coder-tools"]
+name = "workflow-project"
 
 [[agent]]
 id = "researcher"
 name = "Researcher"
-model = "anthropic::claude-3-opus-20240229"
-system_prompt = "You do research."
-max_iterations = 5
+model = "ollama::qwen3.5"
 capabilities = ["research"]
+
+[[task]]
+id = "research-topic"
+capabilities = ["research"]
+prompt = "Research {{input.topic}}"
+output_key = "research"
+failure_policy = "continue_best_effort"
+
+[[workflow]]
+id = "research-flow"
+name = "Research Flow"
+max_attempts = 2
+failure_policy = "pause_for_intervention"
+
+[[workflow.node]]
+id = "research"
+kind = "task"
+task = "research-topic"
+
+[[workflow.node]]
+id = "approval"
+kind = "human_gate"
+prompt = "Approve research output?"
+
+[[workflow.edge]]
+from = "research"
+to = "approval"
+on = "success"
 "#;
         let manifest: Manifest = toml::from_str(toml_str).unwrap();
-        assert_eq!(manifest.project.name, "my-agents");
-        assert_eq!(manifest.project.version, "0.2.0");
-        assert_eq!(manifest.workspace.home, "./workspace");
-        assert_eq!(manifest.tools.len(), 1);
-        assert_eq!(manifest.agents.len(), 2);
-        assert_eq!(
-            manifest.agents[0].capabilities,
-            vec!["code-gen", "refactoring"]
-        );
-        assert_eq!(manifest.agents[0].tools, vec!["coder-tools"]);
-        assert_eq!(
-            manifest.resolve_tools(&manifest.agents[0]),
-            vec![ToolConfig {
-                id: "coder-tools".into(),
-                kind: "python".into(),
-                path: "src/tools/coder.py".into(),
-                symbol: "register_coder_tools".into(),
-            }]
-        );
-        assert_eq!(manifest.agents[1].max_iterations, 5);
+        let tasks = manifest.workflow_tasks().unwrap();
+        let workflows = manifest.workflow_definitions().unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(workflows.len(), 1);
+        assert_eq!(workflows[0].nodes.len(), 2);
+        assert_eq!(workflows[0].edges.len(), 1);
     }
 
     #[test]

@@ -5,7 +5,7 @@ mod manifest;
 mod project_runtime;
 
 use clap::Parser;
-use cli::{AgentCommand, Cli, Command, ToolCommand};
+use cli::{AgentCommand, Cli, Command, ToolCommand, WorkflowCommand};
 
 #[tokio::main]
 async fn main() {
@@ -30,6 +30,13 @@ async fn main() {
         Command::Test(args) => commands::test::run(args).await,
         Command::Monitor(args) => commands::monitor::run(args).await,
         Command::Join(args) => commands::join::run(args).await,
+        Command::Workflow(args) => match args.command {
+            WorkflowCommand::List(args) => commands::workflow::list(args).await,
+            WorkflowCommand::Run(args) => commands::workflow::run(args).await,
+            WorkflowCommand::Inspect(args) => commands::workflow::inspect(args).await,
+            WorkflowCommand::Resume(args) => commands::workflow::resume(args).await,
+            WorkflowCommand::Join(args) => commands::workflow::join(args).await,
+        },
         Command::Agent(args) => match args.command {
             AgentCommand::Add(args) => commands::agent::run(args),
         },
