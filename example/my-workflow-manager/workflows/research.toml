@@ -1,0 +1,36 @@
+[[task]]
+id = "draft_release_note"
+capabilities = ["writing"]
+prompt = "Draft a concise release note for {{input.topic}}."
+output_key = "draft"
+
+[[workflow]]
+id = "release-note-review"
+name = "Release Note Review"
+failure_policy = "continue_best_effort"
+
+[[workflow.node]]
+id = "draft"
+kind = "task"
+task = "draft_release_note"
+
+[[workflow.node]]
+id = "review"
+kind = "task"
+agent = "reviewer"
+prompt = "Review this draft:\n{{context.draft.content}}"
+output_key = "review"
+
+[[workflow.node]]
+id = "done"
+kind = "join"
+
+[[workflow.edge]]
+from = "draft"
+to = "review"
+on = "success"
+
+[[workflow.edge]]
+from = "review"
+to = "done"
+on = "success"
