@@ -183,6 +183,8 @@ pub struct WorkflowArgs {
 
 #[derive(Subcommand)]
 pub enum WorkflowCommand {
+    /// Create a starter workflow TOML file and register it in enki.toml
+    New(WorkflowNewArgs),
     /// List workflows defined in enki.toml
     List(WorkflowListArgs),
     /// Start a workflow run
@@ -193,6 +195,33 @@ pub enum WorkflowCommand {
     Resume(WorkflowResumeArgs),
     /// Interactively respond to workflow interventions
     Join(WorkflowJoinArgs),
+}
+
+#[derive(Parser)]
+pub struct WorkflowNewArgs {
+    /// Path to enki.toml manifest
+    #[arg(long, default_value = "./enki.toml")]
+    pub manifest: PathBuf,
+
+    /// Workflow name used to derive the workflow id and file name
+    #[arg(long)]
+    pub name: String,
+
+    /// Override the generated workflow id
+    #[arg(long)]
+    pub id: Option<String>,
+
+    /// Relative path for the generated workflow TOML file
+    #[arg(long)]
+    pub file: Option<PathBuf>,
+
+    /// Route the starter task to a specific agent id
+    #[arg(long)]
+    pub agent: Option<String>,
+
+    /// Route the starter task by capability; can be repeated
+    #[arg(long = "capability")]
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Parser)]

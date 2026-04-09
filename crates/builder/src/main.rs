@@ -31,6 +31,7 @@ async fn main() {
         Command::Monitor(args) => commands::monitor::run(args).await,
         Command::Join(args) => commands::join::run(args).await,
         Command::Workflow(args) => match args.command {
+            WorkflowCommand::New(args) => commands::workflow::new(args),
             WorkflowCommand::List(args) => commands::workflow::list(args).await,
             WorkflowCommand::Run(args) => commands::workflow::run(args).await,
             WorkflowCommand::Inspect(args) => commands::workflow::inspect(args).await,

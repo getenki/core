@@ -3,8 +3,8 @@ use core_next::workflow::{
     WorkflowEdgeTransition, WorkflowFailurePolicy, WorkflowNodeDefinition, WorkflowNodeKind,
 };
 use serde::Deserialize;
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 /// Root of the `enki.toml` manifest.
 #[derive(Debug, Deserialize)]
@@ -13,6 +13,9 @@ pub struct Manifest {
 
     #[serde(default)]
     pub workspace: WorkspaceConfig,
+
+    #[serde(default, alias = "workflow_tomls", alias = "workflow_paths")]
+    pub workflow_files: Vec<String>,
 
     #[serde(rename = "tool", default)]
     pub tools: Vec<ToolConfig>,
@@ -36,6 +39,9 @@ pub struct ProjectConfig {
 
     #[serde(default = "default_version")]
     pub version: String,
+
+    #[serde(default, alias = "workflow_tomls", alias = "workflow_paths")]
+    pub workflow_files: Vec<String>,
 }
 
 fn default_version() -> String {
@@ -58,6 +64,18 @@ impl Default for WorkspaceConfig {
 
 fn default_home() -> String {
     "./.enki".to_string()
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct WorkflowFileConfig {
+    #[serde(rename = "transform", default)]
+    transforms: Vec<TransformConfig>,
+
+    #[serde(rename = "task", default)]
+    tasks: Vec<TaskConfig>,
+
+    #[serde(rename = "workflow", default)]
+    workflows: Vec<WorkflowConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -302,8 +320,11 @@ impl Manifest {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
 
-        let manifest: Manifest = toml::from_str(&content)
+        let mut manifest: Manifest = toml::from_str(&content)
             .map_err(|e| format!("Failed to parse {}: {e}", path.display()))?;
+
+        manifest.load_workflow_files(path)?;
+        manifest.validate_unique_workflow_items()?;
 
         if manifest.agents.is_empty() {
             return Err(format!(
@@ -377,6 +398,63 @@ impl Manifest {
     pub fn workflow_definitions(&self) -> Result<Vec<WorkflowDefinition>, String> {
         self.workflows.iter().map(WorkflowConfig::to_core).collect()
     }
+    fn load_workflow_files(&mut self, path: &Path) -> Result<(), String> {
+        let mut workflow_files = self.workflow_files.clone();
+        workflow_files.extend(self.project.workflow_files.iter().cloned());
+
+        for workflow_file in workflow_files {
+            if workflow_file.trim().is_empty() {
+                return Err("Workflow include path cannot be empty.".to_string());
+            }
+            let include_path = resolve_include_path(path, &workflow_file);
+            let content = std::fs::read_to_string(&include_path).map_err(|e| {
+                format!(
+                    "Failed to read workflow include {}: {e}",
+                    include_path.display()
+                )
+            })?;
+            let mut include: WorkflowFileConfig = toml::from_str(&content).map_err(|e| {
+                format!(
+                    "Failed to parse workflow include {}: {e}",
+                    include_path.display()
+                )
+            })?;
+
+            self.transforms.append(&mut include.transforms);
+            self.tasks.append(&mut include.tasks);
+            self.workflows.append(&mut include.workflows);
+        }
+
+        Ok(())
+    }
+
+    fn validate_unique_workflow_items(&self) -> Result<(), String> {
+        let mut transform_ids = BTreeSet::new();
+        for transform in &self.transforms {
+            if !transform_ids.insert(transform.id.clone()) {
+                return Err(format!(
+                    "Duplicate workflow transform id '{}'.",
+                    transform.id
+                ));
+            }
+        }
+
+        let mut task_ids = BTreeSet::new();
+        for task in &self.tasks {
+            if !task_ids.insert(task.id.clone()) {
+                return Err(format!("Duplicate workflow task id '{}'.", task.id));
+            }
+        }
+
+        let mut workflow_ids = BTreeSet::new();
+        for workflow in &self.workflows {
+            if !workflow_ids.insert(workflow.id.clone()) {
+                return Err(format!("Duplicate workflow id '{}'.", workflow.id));
+            }
+        }
+
+        Ok(())
+    }
 
     fn validate_transform_reference(&self, transform_id: &str) -> Result<(), String> {
         if is_builtin_transform(transform_id)
@@ -388,6 +466,18 @@ impl Manifest {
             return Ok(());
         }
         Err(format!("Unknown workflow transform '{}'.", transform_id))
+    }
+}
+
+fn resolve_include_path(manifest_path: &Path, include: &str) -> PathBuf {
+    let include_path = Path::new(include);
+    if include_path.is_absolute() {
+        include_path.to_path_buf()
+    } else {
+        manifest_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(include_path)
     }
 }
 
@@ -443,6 +533,8 @@ model = "ollama::qwen3.5"
         assert!(manifest.agents[0].tools.is_empty());
         assert!(manifest.tasks.is_empty());
         assert!(manifest.workflows.is_empty());
+        assert!(manifest.workflow_files.is_empty());
+        assert!(manifest.project.workflow_files.is_empty());
         assert_eq!(manifest.workspace.home, "./.enki");
     }
 
@@ -493,6 +585,70 @@ on = "success"
         assert_eq!(workflows.len(), 1);
         assert_eq!(workflows[0].nodes.len(), 2);
         assert_eq!(workflows[0].edges.len(), 1);
+    }
+
+    fn temp_manifest_dir(label: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{}-{}", label, unique))
+    }
+
+    #[test]
+    fn load_workflow_tomls_from_project_manifest() {
+        let root = temp_manifest_dir("enki-workflow-include");
+        std::fs::create_dir_all(root.join("workflows")).unwrap();
+
+        let manifest_path = root.join("enki.toml");
+        std::fs::write(
+            &manifest_path,
+            r#"
+[project]
+name = "workflow-project"
+workflow_files = ["workflows/release.toml"]
+
+[[agent]]
+id = "researcher"
+name = "Researcher"
+model = "ollama::qwen3.5"
+capabilities = ["research"]
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            root.join("workflows").join("release.toml"),
+            r#"
+[[task]]
+id = "research-topic"
+capabilities = ["research"]
+prompt = "Research {{input.topic}}"
+output_key = "research"
+
+[[workflow]]
+id = "research-flow"
+name = "Research Flow"
+
+[[workflow.node]]
+id = "research"
+kind = "task"
+task = "research-topic"
+"#,
+        )
+        .unwrap();
+
+        let manifest = Manifest::load(&manifest_path).unwrap();
+        let tasks = manifest.workflow_tasks().unwrap();
+        let workflows = manifest.workflow_definitions().unwrap();
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, "research-topic");
+        assert_eq!(workflows.len(), 1);
+        assert_eq!(workflows[0].id, "research-flow");
+        assert_eq!(workflows[0].nodes.len(), 1);
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
