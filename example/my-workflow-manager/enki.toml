@@ -1,17 +1,22 @@
+[[agent]]
+capabilities = [
+    "general",
+    "writing",
+    "analysis",
+]
+id = "assistant"
+max_iterations = 20
+model = "ollama::qwen3.5:0.8b"
+name = "Personal Assistant"
+system_prompt = "You are a helpful personal assistant. You help users with tasks, answer questions, and provide guidance."
+
 [project]
 name = "my-workflow-manager"
 version = "0.1.0"
 workflow_files = [
-    "workflows/research.toml"
+    "workflows/research.toml",
+    "workflows/release-note-review.toml",
 ]
 
 [workspace]
 home = "./.enki"
-
-[[agent]]
-id = "assistant"
-name = "Personal Assistant"
-model = "ollama::qwen3.5:0.8b"
-system_prompt = "You are a helpful personal assistant. You help users with tasks, answer questions, and provide guidance."
-max_iterations = 20
-capabilities = ["general", "writing", "analysis"]

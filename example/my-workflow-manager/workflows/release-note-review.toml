@@ -1,0 +1,15 @@
+[[task]]
+id = "release-note-review-task"
+agent = "assistant"
+prompt = "Complete the workflow task for {{input.message}}."
+output_key = "result"
+
+[[workflow]]
+id = "release-note-review"
+name = "Release Note Review"
+failure_policy = "continue_best_effort"
+
+[[workflow.node]]
+id = "run"
+kind = "task"
+task = "release-note-review-task"
