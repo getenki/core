@@ -7,6 +7,10 @@ version.workspace = true
 name = "enki"
 path = "src/main.rs"
 
+[features]
+default = []
+universal-llm-provider = ["core_next/universal-llm-provider"]
+
 [dependencies]
 clap.workspace = true
 core_next = { path = "../core", package = "core", features = [] }
