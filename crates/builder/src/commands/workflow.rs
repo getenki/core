@@ -3,7 +3,7 @@ use crate::cli::{
     WorkflowRunArgs,
 };
 use crate::manifest::Manifest;
-use crate::project_runtime;
+
 use core_next::agent::AgentDefinition;
 use core_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
 use core_next::workflow::{
@@ -338,17 +338,47 @@ fn update_manifest_with_workflow_file(
         .map_err(|e| format!("Failed to write {}: {e}", manifest_path.display()))
 }
 
+fn validate_workflow_runtime_compatibility(manifest: &Manifest) -> Result<(), String> {
+    let scripted_agents = manifest
+        .agents
+        .iter()
+        .filter(|agent| {
+            agent
+                .script
+                .as_deref()
+                .is_some_and(|script| !script.trim().is_empty())
+        })
+        .map(|agent| agent.id.as_str())
+        .collect::<Vec<_>>();
+    if !scripted_agents.is_empty() {
+        return Err(format!(
+            "Workflow CLI v1 does not execute Python-scripted agents yet. Remove `script` from agent(s): {}",
+            scripted_agents.join(", ")
+        ));
+    }
+
+    let tool_agents = manifest
+        .agents
+        .iter()
+        .filter(|agent| !manifest.resolve_tools(agent).is_empty())
+        .map(|agent| agent.id.as_str())
+        .collect::<Vec<_>>();
+    if !tool_agents.is_empty() {
+        return Err(format!(
+            "Workflow CLI v1 does not execute Python tool-backed agents yet. Remove `tools` from agent(s): {}",
+            tool_agents.join(", ")
+        ));
+    }
+
+    Ok(())
+}
+
 async fn build_workflow_runtime(
     manifest_path: &Path,
     manifest: &Manifest,
 ) -> Result<WorkflowRuntime, String> {
     let project_dir = manifest_path.parent().unwrap_or(Path::new("."));
-    if project_runtime::is_python_project(project_dir) {
-        return Err(
-            "Workflow CLI v1 uses the Rust core runtime and does not execute Python-scripted agents yet."
-                .to_string(),
-        );
-    }
+    validate_workflow_runtime_compatibility(manifest)?;
 
     for transform in &manifest.transforms {
         if !transform.kind.eq_ignore_ascii_case("builtin") {
@@ -460,6 +490,42 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("{}-{}", label, unique))
+    }
+
+    #[test]
+    fn allows_python_project_layout_when_agents_are_rust_managed() {
+        let manifest: Manifest = toml::from_str(
+            r#"[project]
+name = "demo"
+
+[[agent]]
+id = "assistant"
+name = "Assistant"
+model = "ollama::qwen3.5"
+"#,
+        )
+        .unwrap();
+
+        validate_workflow_runtime_compatibility(&manifest).unwrap();
+    }
+
+    #[test]
+    fn rejects_python_scripted_agents_for_workflow_cli() {
+        let manifest: Manifest = toml::from_str(
+            r#"[project]
+name = "demo"
+
+[[agent]]
+id = "assistant"
+name = "Assistant"
+model = "ollama::qwen3.5"
+script = "src/agents/assistant.py"
+"#,
+        )
+        .unwrap();
+
+        let error = validate_workflow_runtime_compatibility(&manifest).unwrap_err();
+        assert!(error.contains("Python-scripted agents"));
     }
 
     #[test]
