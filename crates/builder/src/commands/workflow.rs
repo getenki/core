@@ -3,16 +3,16 @@ use crate::cli::{
     WorkflowRunArgs,
 };
 use crate::manifest::Manifest;
-
 use core_next::agent::AgentDefinition;
 use core_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
 use core_next::workflow::{
-    WorkflowRequest, WorkflowRuntime, WorkflowRuntimeBuilder, WorkflowStatus, WorkflowTaskRunner,
+    WorkflowEvent, WorkflowEventListener, WorkflowRequest, WorkflowResponse, WorkflowRuntime,
+    WorkflowRuntimeBuilder, WorkflowStatus, WorkflowTaskRunner,
 };
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use toml::Value as TomlValue;
 
 pub fn new(args: WorkflowNewArgs) -> Result<(), String> {
@@ -148,22 +148,18 @@ pub async fn list(args: WorkflowListArgs) -> Result<(), String> {
 
 pub async fn run(args: WorkflowRunArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
-    let runtime = build_workflow_runtime(&args.manifest, &manifest).await?;
+    let runtime = build_workflow_runtime(&args.manifest, &manifest, true).await?;
     let input = parse_input(&args.input)?;
     let response = runtime
         .start(WorkflowRequest::new(args.workflow, input))
         .await?;
-    print_response(
-        &response.run_id,
-        &response.status,
-        response.context.to_value(),
-    );
+    print_response(&response, true);
     Ok(())
 }
 
 pub async fn inspect(args: WorkflowInspectArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
-    let runtime = build_workflow_runtime(&args.manifest, &manifest).await?;
+    let runtime = build_workflow_runtime(&args.manifest, &manifest, false).await?;
     let state = runtime.inspect(&args.run).await?;
     let raw = serde_json::to_string_pretty(&state)
         .map_err(|e| format!("Failed to render workflow state: {e}"))?;
@@ -173,19 +169,15 @@ pub async fn inspect(args: WorkflowInspectArgs) -> Result<(), String> {
 
 pub async fn resume(args: WorkflowResumeArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
-    let runtime = build_workflow_runtime(&args.manifest, &manifest).await?;
+    let runtime = build_workflow_runtime(&args.manifest, &manifest, true).await?;
     let response = runtime.resume(&args.run).await?;
-    print_response(
-        &response.run_id,
-        &response.status,
-        response.context.to_value(),
-    );
+    print_response(&response, true);
     Ok(())
 }
 
 pub async fn join(args: WorkflowJoinArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
-    let runtime = build_workflow_runtime(&args.manifest, &manifest).await?;
+    let runtime = build_workflow_runtime(&args.manifest, &manifest, true).await?;
     let stdin = std::io::stdin();
     let mut input = String::new();
 
@@ -193,11 +185,7 @@ pub async fn join(args: WorkflowJoinArgs) -> Result<(), String> {
         let pending = runtime.list_pending_interventions(&args.run).await?;
         if pending.is_empty() {
             let response = runtime.resume(&args.run).await?;
-            print_response(
-                &response.run_id,
-                &response.status,
-                response.context.to_value(),
-            );
+            print_response(&response, true);
             if response.status != WorkflowStatus::Paused {
                 break;
             }
@@ -228,6 +216,58 @@ pub async fn join(args: WorkflowJoinArgs) -> Result<(), String> {
 enum TaskTargetSpec {
     Agent(String),
     Capabilities(Vec<String>),
+}
+
+struct CliWorkflowEventListener {
+    header_printed: Mutex<bool>,
+    event_index: Mutex<usize>,
+}
+
+impl CliWorkflowEventListener {
+    fn new() -> Self {
+        Self {
+            header_printed: Mutex::new(false),
+            event_index: Mutex::new(0),
+        }
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl WorkflowEventListener for CliWorkflowEventListener {
+    async fn on_event(&self, event: &WorkflowEvent) -> Result<(), String> {
+        let mut header_printed = self
+            .header_printed
+            .lock()
+            .map_err(|_| "Workflow event listener header lock was poisoned.".to_string())?;
+        if !*header_printed {
+            match event {
+                WorkflowEvent::WorkflowStarted {
+                    workflow_id,
+                    run_id,
+                } => {
+                    println!("\x1b[1;36mWorkflow run\x1b[0m {}", run_id);
+                    println!("  Workflow: {}", workflow_id);
+                    println!("  Status: Running");
+                    println!();
+                }
+                _ => {
+                    println!("\x1b[1;36mWorkflow run\x1b[0m");
+                    println!();
+                }
+            }
+            println!("\x1b[1;36mLive execution\x1b[0m");
+            *header_printed = true;
+        }
+        drop(header_printed);
+
+        let mut event_index = self
+            .event_index
+            .lock()
+            .map_err(|_| "Workflow event listener index lock was poisoned.".to_string())?;
+        *event_index += 1;
+        println!("  {}. {}", *event_index, render_event_line(event));
+        Ok(())
+    }
 }
 
 fn resolve_task_target(
@@ -376,8 +416,8 @@ fn validate_workflow_runtime_compatibility(manifest: &Manifest) -> Result<(), St
 async fn build_workflow_runtime(
     manifest_path: &Path,
     manifest: &Manifest,
+    live_output: bool,
 ) -> Result<WorkflowRuntime, String> {
-    let project_dir = manifest_path.parent().unwrap_or(Path::new("."));
     validate_workflow_runtime_compatibility(manifest)?;
 
     for transform in &manifest.transforms {
@@ -415,6 +455,9 @@ async fn build_workflow_runtime(
     let mut builder = WorkflowRuntimeBuilder::new()
         .with_workspace_home(workspace_home)
         .with_task_runner(runner);
+    if live_output {
+        builder = builder.with_event_listener(Arc::new(CliWorkflowEventListener::new()));
+    }
 
     for task in manifest.workflow_tasks()? {
         builder = builder.add_task(task);
@@ -437,15 +480,240 @@ fn parse_input(raw: &str) -> Result<Value, String> {
     serde_json::from_str(raw).or_else(|_| Ok(json!({ "message": raw })))
 }
 
-fn print_response(run_id: &str, status: &WorkflowStatus, context: Value) {
-    println!("\x1b[1;36mWorkflow run\x1b[0m {}", run_id);
-    println!("  Status: {:?}", status);
-    println!("  Context:");
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&context).unwrap_or_else(|_| context.to_string())
-    );
+fn print_response(response: &WorkflowResponse, streamed_live: bool) {
+    if streamed_live {
+        println!();
+        println!("\x1b[1;36mFinal status\x1b[0m");
+        println!("  Run: {}", response.run_id);
+        println!("  Workflow: {}", response.workflow_id);
+        println!("  Status: {:?}", response.status);
+        println!();
+    } else {
+        println!("\x1b[1;36mWorkflow run\x1b[0m {}", response.run_id);
+        println!("  Workflow: {}", response.workflow_id);
+        println!("  Status: {:?}", response.status);
+        println!();
+
+        if !response.events.is_empty() {
+            println!("\x1b[1;36mExecution log\x1b[0m");
+            for (index, event) in response.events.iter().enumerate() {
+                println!("  {}. {}", index + 1, render_event_line(event));
+            }
+            println!();
+        }
+    }
+
+    let context_value = response.context.to_value();
+
+    println!("\x1b[1;36mSummary of work\x1b[0m");
+    for line in render_work_summary(&context_value) {
+        println!("  {}", line);
+    }
     println!();
+
+    let detailed_outputs = render_detailed_outputs(&context_value);
+    if !detailed_outputs.is_empty() {
+        println!("\x1b[1;36mDetailed outputs\x1b[0m");
+        for (key, detail) in detailed_outputs {
+            println!("  {}:", key);
+            for line in indent_block(&detail, 4) {
+                println!("{}", line);
+            }
+            println!();
+        }
+    }
+}
+
+fn render_event_line(event: &WorkflowEvent) -> String {
+    match event {
+        WorkflowEvent::WorkflowStarted { workflow_id, .. } => {
+            format!("Workflow '{}' started", workflow_id)
+        }
+        WorkflowEvent::NodeReady { node_id } => format!("Node '{}' became ready", node_id),
+        WorkflowEvent::NodeStarted { node_id, attempt } => {
+            format!("Node '{}' started (attempt {})", node_id, attempt)
+        }
+        WorkflowEvent::NodeCompleted {
+            node_id,
+            output_key,
+        } => format!("Node '{}' completed and wrote '{}'.", node_id, output_key),
+        WorkflowEvent::NodeFailed { node_id, error } => {
+            format!("Node '{}' failed: {}", node_id, summarize_text(error, 120))
+        }
+        WorkflowEvent::NodeRetryScheduled {
+            node_id,
+            attempt,
+            error,
+        } => format!(
+            "Node '{}' scheduled retry after attempt {}: {}",
+            node_id,
+            attempt,
+            summarize_text(error, 120)
+        ),
+        WorkflowEvent::NodeSkipped { node_id } => format!("Node '{}' was skipped", node_id),
+        WorkflowEvent::InterventionRequested {
+            intervention_id,
+            node_id,
+            reason,
+        } => format!(
+            "Intervention '{}' requested for node '{}': {}",
+            intervention_id,
+            node_id,
+            summarize_text(reason, 120)
+        ),
+        WorkflowEvent::InterventionResolved {
+            intervention_id,
+            node_id,
+        } => format!(
+            "Intervention '{}' resolved for node '{}'",
+            intervention_id, node_id
+        ),
+        WorkflowEvent::WorkflowPaused { reason, .. } => {
+            format!("Workflow paused: {}", summarize_text(reason, 120))
+        }
+        WorkflowEvent::WorkflowCompleted { status, .. } => {
+            format!("Workflow finished with status {:?}", status)
+        }
+    }
+}
+
+fn render_work_summary(context: &Value) -> Vec<String> {
+    let Some(map) = context.as_object() else {
+        return vec![format!("Context: {}", summarize_value(context))];
+    };
+
+    let mut lines = Vec::new();
+    if let Some(input) = map.get("input") {
+        lines.push(format!("Input: {}", summarize_value(input)));
+    }
+
+    let outputs = map
+        .iter()
+        .filter(|(key, _)| key.as_str() != "input")
+        .map(|(key, value)| format!("{}: {}", key, summarize_value(value)))
+        .collect::<Vec<_>>();
+
+    if outputs.is_empty() {
+        lines.push("No node outputs yet.".to_string());
+    } else {
+        lines.push("Outputs:".to_string());
+        lines.extend(outputs.into_iter().map(|line| format!("- {}", line)));
+    }
+
+    lines
+}
+
+fn render_detailed_outputs(context: &Value) -> Vec<(String, String)> {
+    let Some(map) = context.as_object() else {
+        return Vec::new();
+    };
+
+    map.iter()
+        .filter(|(key, _)| key.as_str() != "input")
+        .map(|(key, value)| (key.clone(), detailed_value(value)))
+        .collect()
+}
+
+fn detailed_value(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(boolean) => boolean.to_string(),
+        Value::Number(number) => number.to_string(),
+        Value::String(text) => {
+            if text.trim().is_empty() {
+                "<empty>".to_string()
+            } else {
+                text.trim().to_string()
+            }
+        }
+        Value::Array(_) => {
+            serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+        }
+        Value::Object(map) => {
+            if let Some(content) = map.get("content").and_then(Value::as_str) {
+                if !content.trim().is_empty() {
+                    return content.trim().to_string();
+                }
+            }
+            if let Some(response) = map.get("response").and_then(Value::as_str) {
+                if !response.trim().is_empty() {
+                    return response.trim().to_string();
+                }
+            }
+            serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+        }
+    }
+}
+
+fn indent_block(text: &str, spaces: usize) -> Vec<String> {
+    let prefix = " ".repeat(spaces);
+    let normalized = if text.is_empty() {
+        "<empty>".to_string()
+    } else {
+        text.replace("\r\n", "\n")
+    };
+
+    normalized
+        .lines()
+        .map(|line| format!("{}{}", prefix, line))
+        .collect()
+}
+
+fn summarize_value(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(boolean) => boolean.to_string(),
+        Value::Number(number) => number.to_string(),
+        Value::String(text) => summarize_text(text, 160),
+        Value::Array(values) => {
+            let preview = values
+                .iter()
+                .take(4)
+                .map(summarize_value)
+                .collect::<Vec<_>>()
+                .join(", ");
+            if values.len() > 4 {
+                format!("[{}, ...]", preview)
+            } else {
+                format!("[{}]", preview)
+            }
+        }
+        Value::Object(map) => {
+            if let Some(content) = map.get("content").and_then(Value::as_str) {
+                return summarize_text(content, 160);
+            }
+            if let Some(response) = map.get("response").and_then(Value::as_str) {
+                return summarize_text(response, 160);
+            }
+            if let Some(joined) = map.get("joined") {
+                return format!("joined {}", summarize_value(joined));
+            }
+            if let Some(matched) = map.get("matched") {
+                return format!("matched={}", summarize_value(matched));
+            }
+            let keys = map.keys().take(4).cloned().collect::<Vec<_>>().join(", ");
+            if map.len() > 4 {
+                format!("object {{{}, ...}}", keys)
+            } else if keys.is_empty() {
+                "object {}".to_string()
+            } else {
+                format!("object {{{}}}", keys)
+            }
+        }
+    }
+}
+
+fn summarize_text(text: &str, max_len: usize) -> String {
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= max_len {
+        compact
+    } else {
+        let truncated = compact
+            .chars()
+            .take(max_len.saturating_sub(3))
+            .collect::<String>();
+        format!("{}...", truncated)
+    }
 }
 
 fn normalize_name(value: &str) -> String {
@@ -526,6 +794,55 @@ script = "src/agents/assistant.py"
 
         let error = validate_workflow_runtime_compatibility(&manifest).unwrap_err();
         assert!(error.contains("Python-scripted agents"));
+    }
+
+    #[test]
+    fn renders_work_summary_from_context() {
+        let summary = render_work_summary(&json!({
+            "input": { "topic": "demo" },
+            "result": { "content": "Completed the requested workflow task successfully." },
+            "decision": { "matched": true }
+        }));
+
+        assert!(summary.iter().any(|line| line.contains("Input:")));
+        assert!(summary.iter().any(|line| line.contains("Outputs:")));
+        assert!(summary.iter().any(|line| {
+            line.contains("result: Completed the requested workflow task successfully.")
+        }));
+        assert!(
+            summary
+                .iter()
+                .any(|line| line.contains("decision: matched=true"))
+        );
+    }
+
+    #[test]
+    fn renders_detailed_outputs_without_truncating_content() {
+        let detailed = render_detailed_outputs(&json!({
+            "input": { "topic": "demo" },
+            "result": {
+                "content": "Line one of the workflow output.\nLine two keeps going with more detail that should remain visible in full."
+            }
+        }));
+
+        assert_eq!(detailed.len(), 1);
+        assert_eq!(detailed[0].0, "result");
+        assert!(detailed[0].1.contains("Line one of the workflow output."));
+        assert!(
+            detailed[0]
+                .1
+                .contains("Line two keeps going with more detail")
+        );
+    }
+
+    #[test]
+    fn renders_event_lines() {
+        let line = render_event_line(&WorkflowEvent::NodeCompleted {
+            node_id: "review".to_string(),
+            output_key: "summary".to_string(),
+        });
+        assert!(line.contains("review"));
+        assert!(line.contains("summary"));
     }
 
     #[test]

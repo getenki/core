@@ -310,6 +310,11 @@ pub enum WorkflowEvent {
     },
 }
 
+#[async_trait(?Send)]
+pub trait WorkflowEventListener: 'static {
+    async fn on_event(&self, event: &WorkflowEvent) -> Result<(), String>;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkflowTaskResult {
     pub content: String,

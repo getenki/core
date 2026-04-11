@@ -99,6 +99,22 @@ fn uuid_v4_simple() -> String {
     format!("{nanos:x}")
 }
 
+fn workflow_task_failure_message(result: &AgentRunResult) -> Option<String> {
+    if result
+        .steps
+        .last()
+        .is_some_and(|step| matches!(step.kind.as_str(), "failed" | "error"))
+    {
+        return Some(result.content.trim().to_string());
+    }
+
+    if result.content.trim_start().starts_with("LLM error:") {
+        return Some(result.content.trim().to_string());
+    }
+
+    None
+}
+
 #[async_trait(?Send)]
 impl WorkflowTaskRunner for MultiAgentRuntime {
     async fn run_task(
@@ -168,6 +184,10 @@ impl WorkflowTaskRunner for MultiAgentRuntime {
                 None,
             )
             .await;
+
+        if let Some(error) = workflow_task_failure_message(&result) {
+            return Err(error);
+        }
 
         Ok(WorkflowTaskResult {
             content: result.content.clone(),
@@ -350,7 +370,7 @@ impl MultiAgentRuntimeBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::AgentDefinition;
+    use crate::agent::{AgentDefinition, ExecutionStep};
     use crate::llm::{
         ChatMessage, LlmConfig, LlmError, LlmProvider, LlmResponse, Result as LlmResult,
         ToolDefinition,
@@ -424,6 +444,39 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn workflow_task_failure_message_detects_terminal_agent_failures() {
+        let failure = workflow_task_failure_message(&AgentRunResult {
+            content: "LLM error: Model returned an empty response with no tool calls.".into(),
+            steps: vec![ExecutionStep {
+                index: 3,
+                phase: "recover".into(),
+                kind: "failed".into(),
+                detail: "LLM error: Model returned an empty response with no tool calls.".into(),
+            }],
+        });
+
+        assert_eq!(
+            failure.as_deref(),
+            Some("LLM error: Model returned an empty response with no tool calls.")
+        );
+    }
+
+    #[test]
+    fn workflow_task_failure_message_ignores_successful_agent_results() {
+        let failure = workflow_task_failure_message(&AgentRunResult {
+            content: "Finished the task successfully.".into(),
+            steps: vec![ExecutionStep {
+                index: 2,
+                phase: "respond".into(),
+                kind: "final".into(),
+                detail: "Finished the task successfully.".into(),
+            }],
+        });
+
+        assert!(failure.is_none());
     }
 
     #[tokio::test]

@@ -3,9 +3,9 @@ use crate::workflow::persistence::WorkflowWorkspace;
 use crate::workflow::types::{
     InterventionRequest, InterventionStatus, NodeRunState, NodeStatus, RetryPolicy, TaskDefinition,
     TaskTarget, TransformRegistry, WorkflowContext, WorkflowDefinition, WorkflowEdgeDefinition,
-    WorkflowEdgeTransition, WorkflowEvent, WorkflowFailurePolicy, WorkflowNodeDefinition,
-    WorkflowNodeKind, WorkflowRequest, WorkflowResponse, WorkflowRunState, WorkflowStatus,
-    WorkflowTaskRunner, WorkflowTransform,
+    WorkflowEdgeTransition, WorkflowEvent, WorkflowEventListener, WorkflowFailurePolicy,
+    WorkflowNodeDefinition, WorkflowNodeKind, WorkflowRequest, WorkflowResponse, WorkflowRunState,
+    WorkflowStatus, WorkflowTaskRunner, WorkflowTransform,
 };
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,6 +18,7 @@ pub struct WorkflowRuntimeBuilder {
     transforms: TransformRegistry,
     workspace_home: Option<PathBuf>,
     task_runner: Option<Arc<dyn WorkflowTaskRunner>>,
+    event_listener: Option<Arc<dyn WorkflowEventListener>>,
 }
 
 impl WorkflowRuntimeBuilder {
@@ -34,6 +35,7 @@ impl WorkflowRuntimeBuilder {
             transforms,
             workspace_home: None,
             task_runner: None,
+            event_listener: None,
         }
     }
 
@@ -44,6 +46,11 @@ impl WorkflowRuntimeBuilder {
 
     pub fn with_task_runner(mut self, runner: Arc<dyn WorkflowTaskRunner>) -> Self {
         self.task_runner = Some(runner);
+        self
+    }
+
+    pub fn with_event_listener(mut self, listener: Arc<dyn WorkflowEventListener>) -> Self {
+        self.event_listener = Some(listener);
         self
     }
 
@@ -80,6 +87,7 @@ impl WorkflowRuntimeBuilder {
             transforms: self.transforms,
             workspace,
             task_runner,
+            event_listener: self.event_listener,
         };
         runtime.validate_all()?;
         Ok(runtime)
@@ -98,6 +106,7 @@ pub struct WorkflowRuntime {
     transforms: TransformRegistry,
     workspace: WorkflowWorkspace,
     task_runner: Arc<dyn WorkflowTaskRunner>,
+    event_listener: Option<Arc<dyn WorkflowEventListener>>,
 }
 
 impl WorkflowRuntime {
@@ -1132,7 +1141,10 @@ impl WorkflowRuntime {
         event: WorkflowEvent,
     ) -> Result<(), String> {
         self.workspace.append_event(run_id, &event).await?;
-        events.push(event);
+        events.push(event.clone());
+        if let Some(listener) = &self.event_listener {
+            listener.on_event(&event).await?;
+        }
         Ok(())
     }
 }
