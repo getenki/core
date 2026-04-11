@@ -397,6 +397,7 @@ dependencies = [
 name = "enki-cli"
 version = "0.4.15"
 dependencies = [
+ "async-trait",
  "clap",
  "core",
  "serde",

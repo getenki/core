@@ -13,6 +13,7 @@ universal-llm-provider = ["core_next/universal-llm-provider"]
 
 [dependencies]
 clap.workspace = true
+async-trait.workspace = true
 core_next = { path = "../core", package = "core", features = [] }
 serde.workspace = true
 serde_json.workspace = true
