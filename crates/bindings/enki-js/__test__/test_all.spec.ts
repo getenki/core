@@ -2,7 +2,7 @@ import test from 'ava'
 
 import {readFileSync} from 'node:fs'
 
-import {NativeEnkiAgent, NativeMultiAgentRuntime} from '../index.js'
+import {NativeEnkiAgent, NativeMultiAgentRuntime, NativeWorkflowRuntime} from '../index.js'
 
 test('test_all: package.json points to the generated native entrypoints', (t) => {
   const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
@@ -31,4 +31,16 @@ test('test_all: the package entrypoint exposes NativeMultiAgentRuntime', (t) => 
 
   t.is(typeof runtime.process, 'function')
   t.is(typeof runtime.processWithTrace, 'function')
+})
+
+test('test_all: the package entrypoint exposes NativeWorkflowRuntime', (t) => {
+  const runtime = new NativeWorkflowRuntime(
+    [{agentId: 'agent-1', name: 'Agent', model: 'ollama::llama3.2:latest', capabilities: []}],
+    [],
+    [],
+    './test',
+  )
+
+  t.is(typeof runtime.listWorkflowsJson, 'function')
+  t.is(typeof runtime.startJson, 'function')
 })
