@@ -58,6 +58,42 @@ callback interface EnkiStepHandler {
   void on_step(EnkiExecutionStep step);
 };
 
+dictionary EnkiWorkflowMember {
+  string agent_id;
+  string name;
+  string? system_prompt_preamble;
+  string? model;
+  u32? max_iterations;
+  sequence<string> capabilities;
+};
+
+interface EnkiWorkflowRuntime {
+  constructor(
+    sequence<EnkiWorkflowMember> members,
+    sequence<string> tasks_json,
+    sequence<string> workflows_json,
+    string? workspace_home
+  );
+
+  [Async]
+  string list_workflows_json();
+
+  [Async]
+  string list_runs_json();
+
+  [Async]
+  string inspect_json(string run_id);
+
+  [Async]
+  string start_json(string request_json);
+
+  [Async]
+  string resume_json(string run_id);
+
+  [Async]
+  string submit_intervention_json(string run_id, string intervention_id, string? response);
+};
+
 interface EnkiAgent {
   [Name=new]
   constructor(
