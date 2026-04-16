@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 core_next = { package = "core", path = "../../core", default-features = false }
 async-trait.workspace = true
 futures.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true

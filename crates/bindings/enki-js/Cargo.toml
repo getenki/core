@@ -12,6 +12,7 @@ napi = { version = "3.8.4", features = ["tokio_rt", "napi4"] }
 napi-derive = "3.5.3"
 core_next = { package = "core", path = "../../core", features = ["default", "universal-llm-provider"] }
 async-trait = "0.1.89"
+serde.workspace = true
 serde_json = "1.0.149"
 tokio.workspace = true
 tracing.workspace = true

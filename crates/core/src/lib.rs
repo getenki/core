@@ -9,3 +9,8 @@ pub mod registry;
 pub mod runtime;
 pub mod tooling;
 pub mod workflow;
+
+pub use workflow::{
+    TaskDefinition, WorkflowDefinition, WorkflowRequest, WorkflowRunState, WorkflowRuntime,
+    WorkflowTaskRunner,
+};

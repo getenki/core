@@ -9,10 +9,16 @@ use core_next::llm::{
 use core_next::memory::{
     MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
 };
-use core_next::runtime::{Runtime, RuntimeHandler, RuntimeRequest, SessionContext};
+use core_next::runtime::{
+    MultiAgentRuntime, Runtime, RuntimeHandler, RuntimeRequest, SessionContext,
+};
 use core_next::tooling::tool_calling::RegistryToolExecutor;
 use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
+use core_next::{
+    TaskDefinition, WorkflowDefinition, WorkflowRequest, WorkflowRuntime, WorkflowTaskRunner,
+};
 use futures::stream;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
@@ -59,6 +65,16 @@ pub struct EnkiMemoryEntry {
 #[derive(Clone, Debug)]
 pub struct EnkiMemoryModule {
     pub name: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnkiWorkflowMember {
+    pub agent_id: String,
+    pub name: String,
+    pub system_prompt_preamble: Option<String>,
+    pub model: Option<String>,
+    pub max_iterations: Option<u32>,
+    pub capabilities: Vec<String>,
 }
 
 pub trait EnkiToolHandler: Send + Sync {
@@ -379,8 +395,122 @@ struct RunRequest {
     reply_tx: tokio::sync::oneshot::Sender<CoreAgentRunResult>,
 }
 
+enum WorkflowRequestMessage {
+    ListWorkflows {
+        reply_tx: tokio::sync::oneshot::Sender<String>,
+    },
+    ListRuns {
+        reply_tx: tokio::sync::oneshot::Sender<String>,
+    },
+    Inspect {
+        run_id: String,
+        reply_tx: tokio::sync::oneshot::Sender<String>,
+    },
+    Start {
+        request_json: String,
+        reply_tx: tokio::sync::oneshot::Sender<String>,
+    },
+    Resume {
+        run_id: String,
+        reply_tx: tokio::sync::oneshot::Sender<String>,
+    },
+    SubmitIntervention {
+        run_id: String,
+        intervention_id: String,
+        response: Option<String>,
+        reply_tx: tokio::sync::oneshot::Sender<String>,
+    },
+}
+
 pub struct EnkiAgent {
     request_tx: Mutex<mpsc::Sender<RunRequest>>,
+}
+
+pub struct EnkiWorkflowRuntime {
+    request_tx: Mutex<mpsc::Sender<WorkflowRequestMessage>>,
+}
+
+impl EnkiWorkflowRuntime {
+    pub fn new(
+        members: Vec<EnkiWorkflowMember>,
+        tasks_json: Vec<String>,
+        workflows_json: Vec<String>,
+        workspace_home: Option<String>,
+    ) -> Self {
+        let request_tx = spawn_workflow_worker(members, tasks_json, workflows_json, workspace_home);
+        Self {
+            request_tx: Mutex::new(request_tx),
+        }
+    }
+
+    pub async fn list_workflows_json(&self) -> String {
+        self.send_request(|reply_tx| WorkflowRequestMessage::ListWorkflows { reply_tx })
+            .await
+    }
+
+    pub async fn list_runs_json(&self) -> String {
+        self.send_request(|reply_tx| WorkflowRequestMessage::ListRuns { reply_tx })
+            .await
+    }
+
+    pub async fn inspect_json(&self, run_id: String) -> String {
+        self.send_request(move |reply_tx| WorkflowRequestMessage::Inspect { run_id, reply_tx })
+            .await
+    }
+
+    pub async fn start_json(&self, request_json: String) -> String {
+        self.send_request(move |reply_tx| WorkflowRequestMessage::Start {
+            request_json,
+            reply_tx,
+        })
+        .await
+    }
+
+    pub async fn resume_json(&self, run_id: String) -> String {
+        self.send_request(move |reply_tx| WorkflowRequestMessage::Resume { run_id, reply_tx })
+            .await
+    }
+
+    pub async fn submit_intervention_json(
+        &self,
+        run_id: String,
+        intervention_id: String,
+        response: Option<String>,
+    ) -> String {
+        self.send_request(move |reply_tx| WorkflowRequestMessage::SubmitIntervention {
+            run_id,
+            intervention_id,
+            response,
+            reply_tx,
+        })
+        .await
+    }
+
+    async fn send_request<F>(&self, build: F) -> String
+    where
+        F: FnOnce(tokio::sync::oneshot::Sender<String>) -> WorkflowRequestMessage,
+    {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let request = build(reply_tx);
+
+        let send_result = self
+            .request_tx
+            .lock()
+            .map_err(|_| "Worker error: request mutex poisoned".to_string())
+            .and_then(|sender| {
+                sender
+                    .send(request)
+                    .map_err(|_| "Worker error: workflow worker has stopped".to_string())
+            });
+
+        if let Err(message) = send_result {
+            return json_error_payload(&message);
+        }
+
+        reply_rx.await.unwrap_or_else(|_| {
+            json_error_payload("Worker error: workflow worker dropped reply channel")
+        })
+    }
 }
 
 impl EnkiAgent {
@@ -859,6 +989,200 @@ impl EnkiAgent {
                 output: "Worker error: agent worker dropped reply channel".to_string(),
                 steps: Vec::new(),
             })
+    }
+}
+
+fn build_workflow_definition(member: EnkiWorkflowMember) -> (String, AgentDefinition, Vec<String>) {
+    (
+        member.agent_id,
+        AgentDefinition {
+            name: member.name,
+            system_prompt_preamble: member
+                .system_prompt_preamble
+                .unwrap_or_else(|| "You are a helpful Personal Assistant agent.".to_string()),
+            model: member.model.unwrap_or_default(),
+            max_iterations: member.max_iterations.unwrap_or(20).max(1) as usize,
+        },
+        member.capabilities,
+    )
+}
+
+fn parse_json_value<T: DeserializeOwned>(json: &str, label: &str) -> Result<T, String> {
+    serde_json::from_str(json).map_err(|error| format!("Invalid {label} JSON: {error}"))
+}
+
+fn to_json_string<T: Serialize>(value: &T, label: &str) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| format!("Failed to serialize {label}: {error}"))
+}
+
+fn json_error_payload(message: &str) -> String {
+    serde_json::json!({ "error": message }).to_string()
+}
+
+fn spawn_workflow_worker(
+    members: Vec<EnkiWorkflowMember>,
+    tasks_json: Vec<String>,
+    workflows_json: Vec<String>,
+    workspace_home: Option<String>,
+) -> mpsc::Sender<WorkflowRequestMessage> {
+    let workspace_home = workspace_home.map(PathBuf::from);
+    let (request_tx, request_rx) = mpsc::channel::<WorkflowRequestMessage>();
+
+    thread::spawn(move || {
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let message =
+                    format!("Initialization error: failed to create tokio runtime: {error}");
+                fail_workflow_requests(request_rx, &message);
+                return;
+            }
+        };
+
+        let mut multi_agent_builder = MultiAgentRuntime::builder();
+        let mut workflow_builder = WorkflowRuntime::builder();
+
+        if let Some(home) = workspace_home.clone() {
+            multi_agent_builder = multi_agent_builder.with_workspace_home(home.clone());
+            workflow_builder = workflow_builder.with_workspace_home(home);
+        }
+
+        for member in members {
+            let (agent_id, definition, capabilities) = build_workflow_definition(member);
+            multi_agent_builder = multi_agent_builder.add_agent(agent_id, definition, capabilities);
+        }
+
+        for task_json in tasks_json {
+            let task = match parse_json_value::<TaskDefinition>(&task_json, "workflow task") {
+                Ok(task) => task,
+                Err(error) => {
+                    let message = format!("Initialization error: {error}");
+                    fail_workflow_requests(request_rx, &message);
+                    return;
+                }
+            };
+            workflow_builder = workflow_builder.add_task(task);
+        }
+
+        for workflow_json in workflows_json {
+            let workflow =
+                match parse_json_value::<WorkflowDefinition>(&workflow_json, "workflow definition")
+                {
+                    Ok(workflow) => workflow,
+                    Err(error) => {
+                        let message = format!("Initialization error: {error}");
+                        fail_workflow_requests(request_rx, &message);
+                        return;
+                    }
+                };
+            workflow_builder = workflow_builder.add_workflow(workflow);
+        }
+
+        let multi_agent_runtime = match runtime.block_on(multi_agent_builder.build()) {
+            Ok(runtime_instance) => Arc::new(runtime_instance),
+            Err(error) => {
+                let message = format!("Initialization error: {error}");
+                fail_workflow_requests(request_rx, &message);
+                return;
+            }
+        };
+
+        let task_runner: Arc<dyn WorkflowTaskRunner> = multi_agent_runtime.clone();
+        let workflow_runtime: WorkflowRuntime =
+            match runtime.block_on(workflow_builder.with_task_runner(task_runner).build()) {
+                Ok(runtime_instance) => runtime_instance,
+                Err(error) => {
+                    let message = format!("Initialization error: {error}");
+                    fail_workflow_requests(request_rx, &message);
+                    return;
+                }
+            };
+
+        for request in request_rx {
+            match request {
+                WorkflowRequestMessage::ListWorkflows { reply_tx } => {
+                    let payload = workflow_runtime
+                        .list_workflows()
+                        .into_iter()
+                        .map(|workflow| to_json_string(workflow, "workflow definition"))
+                        .collect::<Result<Vec<_>, _>>()
+                        .and_then(|workflows| {
+                            to_json_string(&workflows, "workflow definition list")
+                        })
+                        .unwrap_or_else(|error| json_error_payload(&error));
+                    let _ = reply_tx.send(payload);
+                }
+                WorkflowRequestMessage::ListRuns { reply_tx } => {
+                    let payload = runtime
+                        .block_on(workflow_runtime.list_runs())
+                        .and_then(|runs| to_json_string(&runs, "workflow run list"))
+                        .unwrap_or_else(|error| json_error_payload(&error));
+                    let _ = reply_tx.send(payload);
+                }
+                WorkflowRequestMessage::Inspect { run_id, reply_tx } => {
+                    let payload = runtime
+                        .block_on(workflow_runtime.inspect(&run_id))
+                        .and_then(|state| to_json_string(&state, "workflow run state"))
+                        .unwrap_or_else(|error| json_error_payload(&error));
+                    let _ = reply_tx.send(payload);
+                }
+                WorkflowRequestMessage::Start {
+                    request_json,
+                    reply_tx,
+                } => {
+                    let payload =
+                        parse_json_value::<WorkflowRequest>(&request_json, "workflow request")
+                            .and_then(|request| runtime.block_on(workflow_runtime.start(request)))
+                            .and_then(|response| to_json_string(&response, "workflow response"))
+                            .unwrap_or_else(|error| json_error_payload(&error));
+                    let _ = reply_tx.send(payload);
+                }
+                WorkflowRequestMessage::Resume { run_id, reply_tx } => {
+                    let payload = runtime
+                        .block_on(workflow_runtime.resume(&run_id))
+                        .and_then(|response| to_json_string(&response, "workflow response"))
+                        .unwrap_or_else(|error| json_error_payload(&error));
+                    let _ = reply_tx.send(payload);
+                }
+                WorkflowRequestMessage::SubmitIntervention {
+                    run_id,
+                    intervention_id,
+                    response,
+                    reply_tx,
+                } => {
+                    let payload = runtime
+                        .block_on(workflow_runtime.submit_intervention(
+                            &run_id,
+                            &intervention_id,
+                            response,
+                        ))
+                        .and_then(|state| to_json_string(&state, "workflow run state"))
+                        .unwrap_or_else(|error| json_error_payload(&error));
+                    let _ = reply_tx.send(payload);
+                }
+            }
+        }
+    });
+
+    request_tx
+}
+
+fn fail_workflow_requests(request_rx: mpsc::Receiver<WorkflowRequestMessage>, message: &str) {
+    let payload = json_error_payload(message);
+    for request in request_rx {
+        match request {
+            WorkflowRequestMessage::ListWorkflows { reply_tx }
+            | WorkflowRequestMessage::ListRuns { reply_tx }
+            | WorkflowRequestMessage::Inspect { reply_tx, .. }
+            | WorkflowRequestMessage::Start { reply_tx, .. }
+            | WorkflowRequestMessage::Resume { reply_tx, .. }
+            | WorkflowRequestMessage::SubmitIntervention { reply_tx, .. } => {
+                let _ = reply_tx.send(payload.clone());
+            }
+        }
     }
 }
 

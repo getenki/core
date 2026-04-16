@@ -14,10 +14,14 @@ use core_next::runtime::{
 };
 use core_next::tooling::tool_calling::RegistryToolExecutor;
 use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
+use core_next::{
+  TaskDefinition, WorkflowDefinition, WorkflowRequest, WorkflowRuntime, WorkflowTaskRunner,
+};
 use napi::bindgen_prelude::{FnArgs, Function, JsObjectValue, Object, Unknown};
 use napi::threadsafe_function::{ThreadsafeCallContext, ThreadsafeFunction};
 use napi::{Env, JSON, JsValue};
 use napi_derive::napi;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
@@ -85,6 +89,10 @@ struct AgentHandle {
 
 struct MultiAgentHandle {
   request_tx: Mutex<mpsc::Sender<MultiAgentRequest>>,
+}
+
+struct WorkflowHandle {
+  request_tx: Mutex<mpsc::Sender<WorkflowBindingRequest>>,
 }
 
 struct JsTool {
@@ -194,6 +202,33 @@ enum MultiAgentRequest {
   },
 }
 
+enum WorkflowBindingRequest {
+  ListWorkflows {
+    reply_tx: mpsc::Sender<Result<String, String>>,
+  },
+  ListRuns {
+    reply_tx: mpsc::Sender<Result<String, String>>,
+  },
+  Inspect {
+    run_id: String,
+    reply_tx: mpsc::Sender<Result<String, String>>,
+  },
+  Start {
+    request_json: String,
+    reply_tx: mpsc::Sender<Result<String, String>>,
+  },
+  Resume {
+    run_id: String,
+    reply_tx: mpsc::Sender<Result<String, String>>,
+  },
+  SubmitIntervention {
+    run_id: String,
+    intervention_id: String,
+    response: Option<String>,
+    reply_tx: mpsc::Sender<Result<String, String>>,
+  },
+}
+
 #[napi(string_enum)]
 pub enum JsMemoryKind {
   RecentMessage,
@@ -276,6 +311,11 @@ pub struct NativeEnkiAgent {
 #[napi(js_name = "NativeMultiAgentRuntime")]
 pub struct NativeMultiAgentRuntime {
   inner: Arc<MultiAgentHandle>,
+}
+
+#[napi(js_name = "NativeWorkflowRuntime")]
+pub struct NativeWorkflowRuntime {
+  inner: Arc<WorkflowHandle>,
 }
 
 #[async_trait(?Send)]
@@ -415,6 +455,80 @@ impl RuntimeHandler for BindingAgentRuntimeHandler {
       .run_detailed(&request.session_id, &request.content, on_step)
       .await;
     Ok((result.content, result.steps))
+  }
+}
+
+#[napi]
+impl NativeWorkflowRuntime {
+  #[napi(constructor)]
+  pub fn new(
+    members: Vec<JsMultiAgentMember>,
+    tasks_json: Vec<String>,
+    workflows_json: Vec<String>,
+    workspace_home: Option<String>,
+  ) -> napi::Result<Self> {
+    let request_tx = spawn_workflow_worker(members, tasks_json, workflows_json, workspace_home)?;
+
+    Ok(Self {
+      inner: Arc::new(WorkflowHandle {
+        request_tx: Mutex::new(request_tx),
+      }),
+    })
+  }
+
+  #[napi(js_name = "listWorkflowsJson")]
+  pub async fn list_workflows_json(&self) -> napi::Result<String> {
+    let inner = Arc::clone(&self.inner);
+    tokio::task::spawn_blocking(move || inner.list_workflows_json())
+      .await
+      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
+  }
+
+  #[napi(js_name = "listRunsJson")]
+  pub async fn list_runs_json(&self) -> napi::Result<String> {
+    let inner = Arc::clone(&self.inner);
+    tokio::task::spawn_blocking(move || inner.list_runs_json())
+      .await
+      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
+  }
+
+  #[napi(js_name = "inspectJson")]
+  pub async fn inspect_json(&self, run_id: String) -> napi::Result<String> {
+    let inner = Arc::clone(&self.inner);
+    tokio::task::spawn_blocking(move || inner.inspect_json(run_id))
+      .await
+      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
+  }
+
+  #[napi(js_name = "startJson")]
+  pub async fn start_json(&self, request_json: String) -> napi::Result<String> {
+    let inner = Arc::clone(&self.inner);
+    tokio::task::spawn_blocking(move || inner.start_json(request_json))
+      .await
+      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
+  }
+
+  #[napi(js_name = "resumeJson")]
+  pub async fn resume_json(&self, run_id: String) -> napi::Result<String> {
+    let inner = Arc::clone(&self.inner);
+    tokio::task::spawn_blocking(move || inner.resume_json(run_id))
+      .await
+      .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
+  }
+
+  #[napi(js_name = "submitInterventionJson")]
+  pub async fn submit_intervention_json(
+    &self,
+    run_id: String,
+    intervention_id: String,
+    response: Option<String>,
+  ) -> napi::Result<String> {
+    let inner = Arc::clone(&self.inner);
+    tokio::task::spawn_blocking(move || {
+      inner.submit_intervention_json(run_id, intervention_id, response)
+    })
+    .await
+    .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
   }
 }
 
@@ -721,6 +835,92 @@ impl AgentHandle {
   }
 }
 
+impl WorkflowHandle {
+  fn list_workflows_json(&self) -> napi::Result<String> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = WorkflowBindingRequest::ListWorkflows { reply_tx };
+    self.send(request)?;
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn list_runs_json(&self) -> napi::Result<String> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = WorkflowBindingRequest::ListRuns { reply_tx };
+    self.send(request)?;
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn inspect_json(&self, run_id: String) -> napi::Result<String> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = WorkflowBindingRequest::Inspect { run_id, reply_tx };
+    self.send(request)?;
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn start_json(&self, request_json: String) -> napi::Result<String> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = WorkflowBindingRequest::Start {
+      request_json,
+      reply_tx,
+    };
+    self.send(request)?;
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn resume_json(&self, run_id: String) -> napi::Result<String> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = WorkflowBindingRequest::Resume { run_id, reply_tx };
+    self.send(request)?;
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn submit_intervention_json(
+    &self,
+    run_id: String,
+    intervention_id: String,
+    response: Option<String>,
+  ) -> napi::Result<String> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = WorkflowBindingRequest::SubmitIntervention {
+      run_id,
+      intervention_id,
+      response,
+      reply_tx,
+    };
+    self.send(request)?;
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn send(&self, request: WorkflowBindingRequest) -> napi::Result<()> {
+    let sender = self
+      .request_tx
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Worker error: request mutex poisoned".to_string()))?;
+
+    sender.send(request).map_err(|_| {
+      napi::Error::from_reason("Worker error: workflow worker has stopped".to_string())
+    })
+  }
+}
+
 impl MultiAgentHandle {
   fn process(
     &self,
@@ -847,6 +1047,14 @@ fn compose_system_prompt_preamble(
   format!(
     "{system_prompt_preamble}\n{CUSTOM_AGENTIC_LOOP_START}\n{agentic_loop}\n{CUSTOM_AGENTIC_LOOP_END}"
   )
+}
+
+fn parse_json_value<T: DeserializeOwned>(json: &str, label: &str) -> Result<T, String> {
+  serde_json::from_str(json).map_err(|error| format!("Invalid {label} JSON: {error}"))
+}
+
+fn to_json_string<T: Serialize>(value: &T, label: &str) -> Result<String, String> {
+  serde_json::to_string(value).map_err(|error| format!("Failed to serialize {label}: {error}"))
 }
 
 fn build_tool_handler(
@@ -1249,6 +1457,157 @@ fn spawn_multi_agent_worker(
   Ok(request_tx)
 }
 
+fn spawn_workflow_worker(
+  members: Vec<JsMultiAgentMember>,
+  tasks_json: Vec<String>,
+  workflows_json: Vec<String>,
+  workspace_home: Option<String>,
+) -> napi::Result<mpsc::Sender<WorkflowBindingRequest>> {
+  let workspace_home = workspace_home.map(PathBuf::from);
+  let (request_tx, request_rx) = mpsc::channel::<WorkflowBindingRequest>();
+  let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
+
+  thread::spawn(move || {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+      .enable_all()
+      .build()
+    {
+      Ok(runtime) => runtime,
+      Err(error) => {
+        let message = format!("Initialization error: failed to create tokio runtime: {error}");
+        let _ = ready_tx.send(Err(message.clone()));
+        fail_workflow_requests(request_rx, message);
+        return;
+      }
+    };
+
+    let mut multi_agent_builder = MultiAgentRuntime::builder();
+    let mut workflow_builder = WorkflowRuntime::builder();
+
+    if let Some(home) = workspace_home.clone() {
+      multi_agent_builder = multi_agent_builder.with_workspace_home(home.clone());
+      workflow_builder = workflow_builder.with_workspace_home(home);
+    }
+
+    for member in members {
+      let (agent_id, definition, capabilities) = build_multi_agent_definition(member);
+      multi_agent_builder = multi_agent_builder.add_agent(agent_id, definition, capabilities);
+    }
+
+    for task_json in tasks_json {
+      let task = match parse_json_value::<TaskDefinition>(&task_json, "workflow task") {
+        Ok(task) => task,
+        Err(error) => {
+          let message = format!("Initialization error: {error}");
+          let _ = ready_tx.send(Err(message.clone()));
+          fail_workflow_requests(request_rx, message);
+          return;
+        }
+      };
+      workflow_builder = workflow_builder.add_task(task);
+    }
+
+    for workflow_json in workflows_json {
+      let workflow =
+        match parse_json_value::<WorkflowDefinition>(&workflow_json, "workflow definition") {
+          Ok(workflow) => workflow,
+          Err(error) => {
+            let message = format!("Initialization error: {error}");
+            let _ = ready_tx.send(Err(message.clone()));
+            fail_workflow_requests(request_rx, message);
+            return;
+          }
+        };
+      workflow_builder = workflow_builder.add_workflow(workflow);
+    }
+
+    let multi_agent_runtime = match runtime.block_on(multi_agent_builder.build()) {
+      Ok(runtime_instance) => Arc::new(runtime_instance),
+      Err(error) => {
+        let message = format!("Initialization error: {error}");
+        let _ = ready_tx.send(Err(message.clone()));
+        fail_workflow_requests(request_rx, message);
+        return;
+      }
+    };
+
+    let task_runner: Arc<dyn WorkflowTaskRunner> = multi_agent_runtime.clone();
+    let workflow_runtime: WorkflowRuntime =
+      match runtime.block_on(workflow_builder.with_task_runner(task_runner).build()) {
+        Ok(runtime_instance) => runtime_instance,
+        Err(error) => {
+          let message = format!("Initialization error: {error}");
+          let _ = ready_tx.send(Err(message.clone()));
+          fail_workflow_requests(request_rx, message);
+          return;
+        }
+      };
+
+    let _ = ready_tx.send(Ok(()));
+
+    for request in request_rx {
+      match request {
+        WorkflowBindingRequest::ListWorkflows { reply_tx } => {
+          let result = workflow_runtime
+            .list_workflows()
+            .into_iter()
+            .map(|workflow| to_json_string(workflow, "workflow definition"))
+            .collect::<Result<Vec<_>, _>>()
+            .and_then(|workflows| to_json_string(&workflows, "workflow definition list"));
+          let _ = reply_tx.send(result);
+        }
+        WorkflowBindingRequest::ListRuns { reply_tx } => {
+          let result = runtime
+            .block_on(workflow_runtime.list_runs())
+            .and_then(|runs| to_json_string(&runs, "workflow run list"));
+          let _ = reply_tx.send(result);
+        }
+        WorkflowBindingRequest::Inspect { run_id, reply_tx } => {
+          let result = runtime
+            .block_on(workflow_runtime.inspect(&run_id))
+            .and_then(|state| to_json_string(&state, "workflow run state"));
+          let _ = reply_tx.send(result);
+        }
+        WorkflowBindingRequest::Start {
+          request_json,
+          reply_tx,
+        } => {
+          let result = parse_json_value::<WorkflowRequest>(&request_json, "workflow request")
+            .and_then(|request| runtime.block_on(workflow_runtime.start(request)))
+            .and_then(|response| to_json_string(&response, "workflow response"));
+          let _ = reply_tx.send(result);
+        }
+        WorkflowBindingRequest::Resume { run_id, reply_tx } => {
+          let result = runtime
+            .block_on(workflow_runtime.resume(&run_id))
+            .and_then(|response| to_json_string(&response, "workflow response"));
+          let _ = reply_tx.send(result);
+        }
+        WorkflowBindingRequest::SubmitIntervention {
+          run_id,
+          intervention_id,
+          response,
+          reply_tx,
+        } => {
+          let result = runtime
+            .block_on(workflow_runtime.submit_intervention(&run_id, &intervention_id, response))
+            .and_then(|state| to_json_string(&state, "workflow run state"));
+          let _ = reply_tx.send(result);
+        }
+      }
+    }
+  });
+
+  ready_rx
+    .recv()
+    .map_err(|_| {
+      napi::Error::from_reason("Initialization error: workflow worker exited".to_string())
+    })?
+    .map_err(napi::Error::from_reason)?;
+
+  Ok(request_tx)
+}
+
 fn fail_multi_agent_request(request: MultiAgentRequest, message: String) {
   match request {
     MultiAgentRequest::Process { reply_tx, .. } => {
@@ -1259,6 +1618,21 @@ fn fail_multi_agent_request(request: MultiAgentRequest, message: String) {
     }
     MultiAgentRequest::Discover { reply_tx, .. } => {
       let _ = reply_tx.send(Err(message));
+    }
+  }
+}
+
+fn fail_workflow_requests(request_rx: mpsc::Receiver<WorkflowBindingRequest>, message: String) {
+  for request in request_rx {
+    match request {
+      WorkflowBindingRequest::ListWorkflows { reply_tx }
+      | WorkflowBindingRequest::ListRuns { reply_tx }
+      | WorkflowBindingRequest::Inspect { reply_tx, .. }
+      | WorkflowBindingRequest::Start { reply_tx, .. }
+      | WorkflowBindingRequest::Resume { reply_tx, .. }
+      | WorkflowBindingRequest::SubmitIntervention { reply_tx, .. } => {
+        let _ = reply_tx.send(Err(message.clone()));
+      }
     }
   }
 }

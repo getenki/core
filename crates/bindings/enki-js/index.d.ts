@@ -17,6 +17,16 @@ export declare class NativeMultiAgentRuntime {
   discover(capability?: string | undefined | null, status?: JsAgentStatus | undefined | null): Promise<Array<JsAgentCard>>
 }
 
+export declare class NativeWorkflowRuntime {
+  constructor(members: Array<JsMultiAgentMember>, tasksJson: Array<string>, workflowsJson: Array<string>, workspaceHome?: string | undefined | null)
+  listWorkflowsJson(): Promise<string>
+  listRunsJson(): Promise<string>
+  inspectJson(runId: string): Promise<string>
+  startJson(requestJson: string): Promise<string>
+  resumeJson(runId: string): Promise<string>
+  submitInterventionJson(runId: string, interventionId: string, response?: string | undefined | null): Promise<string>
+}
+
 export declare function initLogger(level: string): void
 
 export interface JsAgentCard {
