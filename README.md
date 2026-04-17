@@ -151,11 +151,14 @@ The repository includes runnable examples under `example/`:
 - `example/basic-js/index.js`: basic JavaScript multi-agent runtime example
 - `example/basic-js/multi-agent-tools-memory.js`: JavaScript example with researcher/coordinator agents, tool calling, and shared memory
 - `example/basic-ts/index.ts`: basic TypeScript multi-agent runtime example
+- `example/basic-ts/agent-workflow.ts`: TypeScript workflow runtime example using `NativeEnkiAgent` and `NativeWorkflowRuntime`
+- `example/basic-ts/human-intervention-workflow.ts`: TypeScript workflow example showing `human_gate` pauses and failure escalation interventions
 - `example/basic-ts/multi-agent-tools-memory.ts`: TypeScript example with researcher/coordinator agents, tool calling, and shared memory
 - `example/enki-py/simple_agent.py`: basic Python single-agent example
 - `example/enki-py/custom_agentic_loop.py`: Python single-agent example with a custom agentic loop prompt
 - `example/enki-py/simple_multi_agent.py`: basic Python multi-agent example
 - `example/enki-py/multi_agent_with_memory_and_tools.py`: Python multi-agent example with tools and shared memory
+- `example/enki-py/human_intervention_workflow.py`: Python workflow example showing `human_gate` pauses and failure escalation interventions
 
 Run the Node examples from their example directories:
 
@@ -170,6 +173,8 @@ npm run start:multi-agent-tools-memory
 cd example/basic-ts
 npm install
 npm start
+npm run start:agent-workflow
+npm run start:human-intervention-workflow
 npm run start:multi-agent-tools-memory
 ```
 
@@ -212,4 +217,6 @@ The `test/.atomiagent/...` fixtures show the expected on-disk layout.
 ## License
 
 This project is licensed under the terms of the [LICENSE](LICENSE) file.
+
+
 

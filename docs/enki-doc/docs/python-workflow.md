@@ -64,6 +64,36 @@ If you construct low-level `EnkiAgent(...)` values directly, they do not automat
 
 For most Python usage, `Agent(...).as_workflow_agent(...)` is the safer default. See `example/enki-py/agent_workflow.py` for the full runnable sample, including a custom `OllamaProvider` fallback.
 
+## Human Intervention
+
+Workflow runs keep pending interventions inside the persisted run state, so human approval and failure escalation stay resumable instead of being tracked in external ad hoc state.
+
+Each pending intervention records:
+
+- `workflow_id`
+- `run_id`
+- `node_id`
+- `prompt`
+- `reason`
+- `response`
+- `created_at` and `resolved_at`
+
+Two common patterns are supported:
+
+- `human_gate` nodes pause the workflow immediately and create an intervention request
+- `failure_policy: "pause_for_intervention"` pauses a failed task and asks the human whether to `retry`, `skip`, `continue`, or `fail`
+
+The full runnable example is [`example/enki-py/human_intervention_workflow.py`](/I:/projects/enki/core-next/example/enki-py/human_intervention_workflow.py). It shows both:
+
+- a first-class `human_gate` approval flow
+- a failed task escalating into an intervention, then resuming after a `skip` response
+
+The core interaction loop is:
+
+1. `start_json(...)` returns a paused workflow response
+2. `inspect_json(run_id)` exposes `pending_interventions`
+3. `submit_intervention_json(run_id, intervention_id, response)` resolves the chosen intervention
+4. `resume_json(run_id)` continues the workflow from persisted state
 Supported workflow methods:
 
 - `list_workflows_json()`
@@ -72,6 +102,7 @@ Supported workflow methods:
 - `start_json(request_json)`
 - `resume_json(run_id)`
 - `submit_intervention_json(run_id, intervention_id, response=None)`
+
 
 
 

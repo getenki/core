@@ -7,6 +7,7 @@ export declare class NativeEnkiAgent {
   static withToolsAndMemory(name: string | undefined | null, systemPromptPreamble: string | undefined | null, model: string | undefined | null, maxIterations: number | undefined | null, workspaceHome: string | undefined | null, tools: Array<object>, toolHandler: SharedToolCallback | undefined | null, memories: Array<JsMemoryModule>, recordHandler: RecordCallback, recallHandler: RecallCallback, flushHandler: SessionCallback, consolidateHandler: SessionCallback, agenticLoop?: string | undefined | null): NativeEnkiAgent
   run(sessionId: string, userMessage: string): Promise<string>
   runWithTrace(sessionId: string, userMessage: string): Promise<JsAgentRunResult>
+  configureWorkflow(agentId: string, capabilities: Array<string>): void
 }
 
 export declare class NativeMultiAgentRuntime {
@@ -18,7 +19,7 @@ export declare class NativeMultiAgentRuntime {
 }
 
 export declare class NativeWorkflowRuntime {
-  constructor(members: Array<JsMultiAgentMember>, tasksJson: Array<string>, workflowsJson: Array<string>, workspaceHome?: string | undefined | null)
+  constructor(agents: Array<NativeEnkiAgent>, tasksJson: Array<string>, workflowsJson: Array<string>, workspaceHome?: string | undefined | null)
   listWorkflowsJson(): Promise<string>
   listRunsJson(): Promise<string>
   inspectJson(runId: string): Promise<string>

@@ -8,6 +8,8 @@
   "main": "index.ts",
   "scripts": {
     "start": "tsx index.ts",
+    "start:agent-workflow": "tsx agent-workflow.ts",
+    "start:human-intervention-workflow": "tsx human-intervention-workflow.ts",
     "start:multi-agent-tools-memory": "tsx multi-agent-tools-memory.ts",
     "start:excel-dashboard": "tsx excel-dashboard-multi-agent.ts",
     "typecheck": "tsc --noEmit"
@@ -22,3 +24,5 @@
     "typescript": "^5.9.2"
   }
 }
+
+

@@ -1,30 +1,31 @@
 import test from 'ava'
 
-import {NativeWorkflowRuntime} from '../index.js'
+import {NativeEnkiAgent, NativeWorkflowRuntime} from '../index.js'
 
 const testWithOllama = process.env.ENKI_RUN_OLLAMA_TESTS === '1' ? test : test.skip
 const model = process.env.ENKI_MODEL ?? 'ollama::llama3.2:latest'
+const workspaceHome = './test/workflow-example-js'
 
-function buildMembers() {
-  return [
-    {
-      agentId: 'researcher',
-      name: 'Researcher',
-      systemPromptPreamble:
-        'You are a concise researcher. Return short factual notes that are easy to summarize.',
-      model,
-      maxIterations: 4,
-      capabilities: ['research'],
-    },
-    {
-      agentId: 'writer',
-      name: 'Writer',
-      systemPromptPreamble: 'You turn research notes into short polished summaries.',
-      model,
-      maxIterations: 4,
-      capabilities: ['writing'],
-    },
-  ]
+function buildAgents() {
+  const researcher = new NativeEnkiAgent(
+    'Researcher',
+    'You are a concise researcher. Return short factual notes that are easy to summarize.',
+    model,
+    4,
+    workspaceHome,
+  )
+  researcher.configureWorkflow('researcher', ['research'])
+
+  const writer = new NativeEnkiAgent(
+    'Writer',
+    'You turn research notes into short polished summaries.',
+    model,
+    4,
+    workspaceHome,
+  )
+  writer.configureWorkflow('writer', ['writing'])
+
+  return [researcher, writer]
 }
 
 function buildTasksJson() {
@@ -79,10 +80,10 @@ function buildWorkflowsJson() {
 
 test('hello_enki_workflow: constructs a workflow runtime', (t) => {
   const runtime = new NativeWorkflowRuntime(
-    buildMembers(),
+    buildAgents(),
     buildTasksJson(),
     buildWorkflowsJson(),
-    './test/workflow-example-js',
+    workspaceHome,
   )
 
   t.is(typeof runtime.listWorkflowsJson, 'function')
@@ -93,10 +94,10 @@ test('hello_enki_workflow: constructs a workflow runtime', (t) => {
 
 test('hello_enki_workflow: lists configured workflows', async (t) => {
   const runtime = new NativeWorkflowRuntime(
-    buildMembers(),
+    buildAgents(),
     buildTasksJson(),
     buildWorkflowsJson(),
-    './test/workflow-example-js',
+    workspaceHome,
   )
 
   const workflows = JSON.parse(await runtime.listWorkflowsJson())
@@ -111,10 +112,10 @@ testWithOllama('hello_enki_workflow: starts a workflow and inspects the persiste
   t.timeout(10 * 60 * 1000)
 
   const runtime = new NativeWorkflowRuntime(
-    buildMembers(),
+    buildAgents(),
     buildTasksJson(),
     buildWorkflowsJson(),
-    './test/workflow-example-js',
+    workspaceHome,
   )
 
   const response = JSON.parse(
@@ -128,7 +129,7 @@ testWithOllama('hello_enki_workflow: starts a workflow and inspects the persiste
 
   t.is(response.workflow_id, 'research-to-summary')
   t.truthy(response.run_id)
-  t.truthy(response.context.summary)
+  t.truthy(response.context.values.summary)
 
   const persisted = JSON.parse(await runtime.inspectJson(response.run_id))
   t.is(persisted.run_id, response.run_id)
