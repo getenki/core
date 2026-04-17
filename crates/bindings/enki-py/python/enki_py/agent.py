@@ -793,6 +793,19 @@ class Agent(Generic[DepsT]):
         self._dirty = True
         return memory
 
+    def as_workflow_agent(
+            self,
+            *,
+            agent_id: str,
+            capabilities: list[str] | None = None,
+    ) -> Any:
+        backend = self._ensure_backend()
+        backend.configure_workflow(
+            agent_id=agent_id,
+            capabilities=capabilities or [],
+        )
+        return backend
+
     def _tool_specs(self) -> list[_LowLevelTool]:
         return [tool.as_low_level_tool() for tool in self._tools.values()]
 
@@ -1111,3 +1124,4 @@ __all__ = [
     "RunContext",
     "Tool",
 ]
+

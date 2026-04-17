@@ -8,7 +8,7 @@ import enki_py
 
 
 MODEL = os.getenv("ENKI_MODEL", "ollama::qwen3.5:latest")
-WORKSPACE_HOME = Path("./test/workflow-example")
+WORKSPACE_HOME = Path("./example/enki-py/.enki-workflow")
 
 
 class OllamaProvider(enki_py.LlmProviderBackend):
@@ -183,7 +183,7 @@ async def main() -> None:
             json.dumps(
                 {
                     "workflow_id": "research-to-summary",
-                    "input": {"topic": "workflow bindings in enki-py"},
+                    "input": {"topic": "agent workflows in enki-py"},
                 }
             )
         )
@@ -196,10 +196,6 @@ async def main() -> None:
     inspected = json.loads(await runtime.inspect_json(run_id))
     print("\nPersisted run state:")
     print(json.dumps(inspected, indent=2))
-
-    runs = json.loads(await runtime.list_runs_json())
-    print("\nKnown runs:")
-    print(json.dumps(runs, indent=2))
 
 
 if __name__ == "__main__":

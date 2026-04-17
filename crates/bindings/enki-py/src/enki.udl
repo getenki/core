@@ -58,18 +58,9 @@ callback interface EnkiStepHandler {
   void on_step(EnkiExecutionStep step);
 };
 
-dictionary EnkiWorkflowMember {
-  string agent_id;
-  string name;
-  string? system_prompt_preamble;
-  string? model;
-  u32? max_iterations;
-  sequence<string> capabilities;
-};
-
 interface EnkiWorkflowRuntime {
   constructor(
-    sequence<EnkiWorkflowMember> members,
+    sequence<EnkiAgent> agents,
     sequence<string> tasks_json,
     sequence<string> workflows_json,
     string? workspace_home
@@ -195,4 +186,6 @@ interface EnkiAgent {
 
   [Async]
   EnkiAgentRunResult run_with_events(string session_id, string user_message, EnkiStepHandler handler);
+
+  void configure_workflow(string agent_id, sequence<string> capabilities);
 };

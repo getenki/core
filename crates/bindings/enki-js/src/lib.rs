@@ -2,27 +2,27 @@
 
 use async_trait::async_trait;
 use core_next::agent::{
-  Agent as CoreAgent, AgentDefinition, AgentRunResult as CoreAgentRunResult,
-  ExecutionStep as CoreExecutionStep,
+  Agent as CoreAgent, AgentDefinition, AgentExecutionContext,
+  AgentRunResult as CoreAgentRunResult, ExecutionStep as CoreExecutionStep,
 };
 use core_next::memory::{
   MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
 };
 use core_next::registry::{AgentCard, AgentStatus, DiscoverQuery};
-use core_next::runtime::{
-  MultiAgentRuntime, Runtime, RuntimeHandler, RuntimeRequest, SessionContext,
-};
+use core_next::runtime::MultiAgentRuntime;
 use core_next::tooling::tool_calling::RegistryToolExecutor;
-use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
+use core_next::tooling::types::{Tool, ToolContext, ToolRegistry, WorkflowToolContext};
+use core_next::workflow::{TaskTarget, WorkflowTaskResult};
 use core_next::{
   TaskDefinition, WorkflowDefinition, WorkflowRequest, WorkflowRuntime, WorkflowTaskRunner,
 };
-use napi::bindgen_prelude::{FnArgs, Function, JsObjectValue, Object, Unknown};
+use napi::bindgen_prelude::{ClassInstance, FnArgs, Function, JsObjectValue, Object, Unknown};
 use napi::threadsafe_function::{ThreadsafeCallContext, ThreadsafeFunction};
 use napi::{Env, JSON, JsValue};
 use napi_derive::napi;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
@@ -80,10 +80,18 @@ type SessionCallback<'scope> = Function<'scope, FnArgs<(String, String)>, ()>;
 struct RunRequest {
   session_id: String,
   user_message: String,
+  exec_ctx: AgentExecutionContext,
   reply_tx: mpsc::Sender<CoreAgentRunResult>,
 }
 
+#[derive(Clone, Debug)]
+struct WorkflowRegistration {
+  agent_id: String,
+  capabilities: Vec<String>,
+}
+
 struct AgentHandle {
+  workflow_registration: Mutex<WorkflowRegistration>,
   request_tx: Mutex<mpsc::Sender<RunRequest>>,
 }
 
@@ -93,6 +101,11 @@ struct MultiAgentHandle {
 
 struct WorkflowHandle {
   request_tx: Mutex<mpsc::Sender<WorkflowBindingRequest>>,
+}
+
+struct BindingWorkflowTaskRunner {
+  agents_by_id: HashMap<String, Arc<AgentHandle>>,
+  registrations: Vec<WorkflowRegistration>,
 }
 
 struct JsTool {
@@ -111,9 +124,6 @@ struct JsMemoryRouter {
   provider_names: Vec<String>,
 }
 
-struct BindingAgentRuntimeHandler {
-  agent: CoreAgent,
-}
 
 struct JsMemoryHandlers {
   record: MemoryRecordHandler,
@@ -434,40 +444,21 @@ impl MemoryRouter for JsMemoryRouter {
   }
 }
 
-#[async_trait(?Send)]
-impl RuntimeHandler for BindingAgentRuntimeHandler {
-  async fn handle(
-    &self,
-    request: &RuntimeRequest,
-    _session: &SessionContext,
-  ) -> Result<String, String> {
-    Ok(self.agent.run(&request.session_id, &request.content).await)
-  }
-
-  async fn handle_detailed(
-    &self,
-    request: &RuntimeRequest,
-    _session: &SessionContext,
-    on_step: Option<std::sync::Arc<dyn Fn(CoreExecutionStep) + Send + Sync>>,
-  ) -> Result<(String, Vec<CoreExecutionStep>), String> {
-    let result = self
-      .agent
-      .run_detailed(&request.session_id, &request.content, on_step)
-      .await;
-    Ok((result.content, result.steps))
-  }
-}
 
 #[napi]
 impl NativeWorkflowRuntime {
   #[napi(constructor)]
   pub fn new(
-    members: Vec<JsMultiAgentMember>,
+    agents: Vec<ClassInstance<'_, NativeEnkiAgent>>,
     tasks_json: Vec<String>,
     workflows_json: Vec<String>,
     workspace_home: Option<String>,
   ) -> napi::Result<Self> {
-    let request_tx = spawn_workflow_worker(members, tasks_json, workflows_json, workspace_home)?;
+    let agent_handles = agents
+      .into_iter()
+      .map(|agent| Arc::clone(&agent.inner))
+      .collect();
+    let request_tx = spawn_workflow_worker(agent_handles, tasks_json, workflows_json, workspace_home)?;
 
     Ok(Self {
       inner: Arc::new(WorkflowHandle {
@@ -680,6 +671,11 @@ impl NativeEnkiAgent {
       .map_err(|error| napi::Error::from_reason(format!("Worker join error: {error}")))?
       .map(JsAgentRunResult::from)
   }
+
+  #[napi(js_name = "configureWorkflow")]
+  pub fn configure_workflow(&self, agent_id: String, capabilities: Vec<String>) -> napi::Result<()> {
+    self.inner.configure_workflow(agent_id, capabilities)
+  }
 }
 
 #[napi]
@@ -801,10 +797,15 @@ impl NativeEnkiAgent {
       model,
       max_iterations,
     );
+    let workflow_agent_id = definition.name.clone();
     let request_tx = spawn_agent_worker(definition, workspace_home, worker_config)?;
 
     Ok(Self {
       inner: Arc::new(AgentHandle {
+        workflow_registration: Mutex::new(WorkflowRegistration {
+          agent_id: workflow_agent_id,
+          capabilities: Vec::new(),
+        }),
         request_tx: Mutex::new(request_tx),
       }),
     })
@@ -812,11 +813,40 @@ impl NativeEnkiAgent {
 }
 
 impl AgentHandle {
+  fn configure_workflow(&self, agent_id: String, capabilities: Vec<String>) -> napi::Result<()> {
+    let mut registration = self
+      .workflow_registration
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Worker error: workflow registration mutex poisoned".to_string()))?;
+
+    registration.agent_id = agent_id;
+    registration.capabilities = capabilities;
+    Ok(())
+  }
+
+  fn workflow_registration(&self) -> napi::Result<WorkflowRegistration> {
+    self
+      .workflow_registration
+      .lock()
+      .map(|registration| registration.clone())
+      .map_err(|_| napi::Error::from_reason("Worker error: workflow registration mutex poisoned".to_string()))
+  }
+
   fn run(&self, session_id: String, user_message: String) -> napi::Result<CoreAgentRunResult> {
+    self.run_core(session_id, user_message, AgentExecutionContext::default())
+  }
+
+  fn run_core(
+    &self,
+    session_id: String,
+    user_message: String,
+    exec_ctx: AgentExecutionContext,
+  ) -> napi::Result<CoreAgentRunResult> {
     let (reply_tx, reply_rx) = mpsc::channel();
     let request = RunRequest {
       session_id,
       user_message,
+      exec_ctx,
       reply_tx,
     };
 
@@ -1260,6 +1290,22 @@ fn error_run_result(message: impl Into<String>) -> CoreAgentRunResult {
   }
 }
 
+fn workflow_task_failure_message(result: &CoreAgentRunResult) -> Option<String> {
+  if result
+    .steps
+    .last()
+    .is_some_and(|step| matches!(step.kind.as_str(), "failed" | "error"))
+  {
+    return Some(result.content.trim().to_string());
+  }
+
+  if result.content.trim_start().starts_with("LLM error:") {
+    return Some(result.content.trim().to_string());
+  }
+
+  None
+}
+
 fn spawn_agent_worker(
   definition: AgentDefinition,
   workspace_home: Option<String>,
@@ -1313,22 +1359,16 @@ fn spawn_agent_worker(
         return;
       }
     };
-    let runtime_instance = Runtime::new(BindingAgentRuntimeHandler { agent });
 
     let _ = ready_tx.send(Ok(()));
 
     for request in request_rx {
-      let result = runtime.block_on(runtime_instance.process_detailed(
-        RuntimeRequest::new(&request.session_id, "binding-js", &request.user_message),
+      let response = runtime.block_on(agent.run_detailed_with_context(
+        &request.session_id,
+        &request.user_message,
+        request.exec_ctx,
         None,
       ));
-      let response = match result {
-        Ok(result) => CoreAgentRunResult {
-          content: result.response.content,
-          steps: result.steps,
-        },
-        Err(error) => error_run_result(error),
-      };
       let _ = request.reply_tx.send(response);
     }
   });
@@ -1458,11 +1498,17 @@ fn spawn_multi_agent_worker(
 }
 
 fn spawn_workflow_worker(
-  members: Vec<JsMultiAgentMember>,
+  agents: Vec<Arc<AgentHandle>>,
   tasks_json: Vec<String>,
   workflows_json: Vec<String>,
   workspace_home: Option<String>,
 ) -> napi::Result<mpsc::Sender<WorkflowBindingRequest>> {
+  if agents.is_empty() {
+    return Err(napi::Error::from_reason(
+      "Workflow runtime requires at least one agent".to_string(),
+    ));
+  }
+
   let workspace_home = workspace_home.map(PathBuf::from);
   let (request_tx, request_rx) = mpsc::channel::<WorkflowBindingRequest>();
   let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
@@ -1481,17 +1527,46 @@ fn spawn_workflow_worker(
       }
     };
 
-    let mut multi_agent_builder = MultiAgentRuntime::builder();
     let mut workflow_builder = WorkflowRuntime::builder();
 
-    if let Some(home) = workspace_home.clone() {
-      multi_agent_builder = multi_agent_builder.with_workspace_home(home.clone());
+    if let Some(home) = workspace_home {
       workflow_builder = workflow_builder.with_workspace_home(home);
     }
 
-    for member in members {
-      let (agent_id, definition, capabilities) = build_multi_agent_definition(member);
-      multi_agent_builder = multi_agent_builder.add_agent(agent_id, definition, capabilities);
+    let mut registrations = Vec::with_capacity(agents.len());
+    let mut agents_by_id = HashMap::with_capacity(agents.len());
+    for agent in agents {
+      let registration = match agent.workflow_registration() {
+        Ok(registration) => registration,
+        Err(error) => {
+          let message = error.to_string();
+          let _ = ready_tx.send(Err(message.clone()));
+          fail_workflow_requests(request_rx, message);
+          return;
+        }
+      };
+
+      if registration.agent_id.trim().is_empty() {
+        let message = "Initialization error: workflow agent_id cannot be empty.".to_string();
+        let _ = ready_tx.send(Err(message.clone()));
+        fail_workflow_requests(request_rx, message);
+        return;
+      }
+
+      if agents_by_id
+        .insert(registration.agent_id.clone(), Arc::clone(&agent))
+        .is_some()
+      {
+        let message = format!(
+          "Initialization error: duplicate workflow agent_id '{}'.",
+          registration.agent_id
+        );
+        let _ = ready_tx.send(Err(message.clone()));
+        fail_workflow_requests(request_rx, message);
+        return;
+      }
+
+      registrations.push(registration);
     }
 
     for task_json in tasks_json {
@@ -1521,17 +1596,10 @@ fn spawn_workflow_worker(
       workflow_builder = workflow_builder.add_workflow(workflow);
     }
 
-    let multi_agent_runtime = match runtime.block_on(multi_agent_builder.build()) {
-      Ok(runtime_instance) => Arc::new(runtime_instance),
-      Err(error) => {
-        let message = format!("Initialization error: {error}");
-        let _ = ready_tx.send(Err(message.clone()));
-        fail_workflow_requests(request_rx, message);
-        return;
-      }
-    };
-
-    let task_runner: Arc<dyn WorkflowTaskRunner> = multi_agent_runtime.clone();
+    let task_runner: Arc<dyn WorkflowTaskRunner> = Arc::new(BindingWorkflowTaskRunner {
+      agents_by_id,
+      registrations,
+    });
     let workflow_runtime: WorkflowRuntime =
       match runtime.block_on(workflow_builder.with_task_runner(task_runner).build()) {
         Ok(runtime_instance) => runtime_instance,
@@ -1606,6 +1674,95 @@ fn spawn_workflow_worker(
     .map_err(napi::Error::from_reason)?;
 
   Ok(request_tx)
+}
+
+#[async_trait(?Send)]
+impl WorkflowTaskRunner for BindingWorkflowTaskRunner {
+  async fn run_task(
+    &self,
+    target: &TaskTarget,
+    metadata: &WorkflowToolContext,
+    workspace_dir: &std::path::Path,
+    prompt: &str,
+  ) -> Result<WorkflowTaskResult, String> {
+    let registration = match target {
+      TaskTarget::AgentId(agent_id) => self
+        .registrations
+        .iter()
+        .find(|registration| registration.agent_id == *agent_id)
+        .ok_or_else(|| format!("Workflow target agent '{}' not found.", agent_id))?,
+      TaskTarget::Capabilities(required) => {
+        let mut matches = self
+          .registrations
+          .iter()
+          .filter(|registration| {
+            required.iter().all(|required| {
+              registration
+                .capabilities
+                .iter()
+                .any(|capability| capability == required)
+            })
+          })
+          .collect::<Vec<_>>();
+        matches.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
+        match matches.as_slice() {
+          [registration] => *registration,
+          [] => {
+            return Err(format!(
+              "No agent matched workflow capabilities: {}",
+              required.join(", ")
+            ));
+          }
+          _ => {
+            let matched_ids = matches
+              .into_iter()
+              .map(|registration| registration.agent_id.clone())
+              .collect::<Vec<_>>();
+            return Err(format!(
+              "Multiple agents matched workflow capabilities {}: {}",
+              required.join(", "),
+              matched_ids.join(", ")
+            ));
+          }
+        }
+      }
+    };
+
+    let agent = self
+      .agents_by_id
+      .get(&registration.agent_id)
+      .ok_or_else(|| format!("Workflow target agent '{}' not found.", registration.agent_id))?;
+    let session_id = format!(
+      "wf-{}-{}-attempt-{}",
+      metadata.run_id, metadata.node_id, metadata.attempt
+    );
+    let result = agent
+      .run_core(
+        session_id.clone(),
+        prompt.to_string(),
+        AgentExecutionContext {
+          workspace_dir: Some(workspace_dir.to_path_buf()),
+          workflow: Some(metadata.clone()),
+        },
+      )
+      .map_err(|error| error.to_string())?;
+
+    if let Some(error) = workflow_task_failure_message(&result) {
+      return Err(error);
+    }
+
+    Ok(WorkflowTaskResult {
+      content: result.content.clone(),
+      value: json!({
+        "content": result.content,
+        "agent_id": registration.agent_id.clone(),
+        "session_id": session_id,
+        "attempt": metadata.attempt,
+      }),
+      agent_id: registration.agent_id.clone(),
+      steps: result.steps,
+    })
+  }
 }
 
 fn fail_multi_agent_request(request: MultiAgentRequest, message: String) {

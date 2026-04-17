@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use core_next::agent::{
-    Agent, AgentDefinition, AgentRunResult as CoreAgentRunResult,
+    Agent, AgentDefinition, AgentExecutionContext, AgentRunResult as CoreAgentRunResult,
     ExecutionStep as CoreExecutionStep,
 };
 use core_next::llm::{
@@ -9,17 +9,16 @@ use core_next::llm::{
 use core_next::memory::{
     MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
 };
-use core_next::runtime::{
-    MultiAgentRuntime, Runtime, RuntimeHandler, RuntimeRequest, SessionContext,
-};
 use core_next::tooling::tool_calling::RegistryToolExecutor;
-use core_next::tooling::types::{Tool, ToolContext, ToolRegistry};
+use core_next::tooling::types::{Tool, ToolContext, ToolRegistry, WorkflowToolContext};
+use core_next::workflow::{TaskTarget, WorkflowTaskResult};
 use core_next::{
     TaskDefinition, WorkflowDefinition, WorkflowRequest, WorkflowRuntime, WorkflowTaskRunner,
 };
 use futures::stream;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
@@ -67,15 +66,6 @@ pub struct EnkiMemoryModule {
     pub name: String,
 }
 
-#[derive(Clone, Debug)]
-pub struct EnkiWorkflowMember {
-    pub agent_id: String,
-    pub name: String,
-    pub system_prompt_preamble: Option<String>,
-    pub model: Option<String>,
-    pub max_iterations: Option<u32>,
-    pub capabilities: Vec<String>,
-}
 
 pub trait EnkiToolHandler: Send + Sync {
     fn execute(
@@ -137,10 +127,6 @@ struct PythonMemoryRouter {
 struct PythonLlmProvider {
     model: String,
     handler: Arc<dyn EnkiLlmHandler>,
-}
-
-struct BindingAgentRuntimeHandler {
-    agent: Agent,
 }
 
 #[async_trait(?Send)]
@@ -257,30 +243,6 @@ impl MemoryRouter for PythonMemoryRouter {
     }
 }
 
-#[async_trait(?Send)]
-impl RuntimeHandler for BindingAgentRuntimeHandler {
-    async fn handle(
-        &self,
-        request: &RuntimeRequest,
-        _session: &SessionContext,
-    ) -> Result<String, String> {
-        Ok(self.agent.run(&request.session_id, &request.content).await)
-    }
-
-    async fn handle_detailed(
-        &self,
-        request: &RuntimeRequest,
-        _session: &SessionContext,
-        on_step: Option<std::sync::Arc<dyn Fn(CoreExecutionStep) + Send + Sync>>,
-    ) -> Result<(String, Vec<CoreExecutionStep>), String> {
-        let result = self
-            .agent
-            .run_detailed(&request.session_id, &request.content, on_step)
-            .await;
-        Ok((result.content, result.steps))
-    }
-}
-
 fn build_memory_manager(
     memories: Vec<EnkiMemoryModule>,
     handler: Arc<dyn EnkiMemoryHandler>,
@@ -391,8 +353,20 @@ impl LlmProvider for PythonLlmProvider {
 struct RunRequest {
     session_id: String,
     user_message: String,
+    exec_ctx: AgentExecutionContext,
     on_step: Option<std::sync::Arc<dyn Fn(CoreExecutionStep) + Send + Sync>>,
     reply_tx: tokio::sync::oneshot::Sender<CoreAgentRunResult>,
+}
+
+#[derive(Clone, Debug)]
+struct WorkflowRegistration {
+    agent_id: String,
+    capabilities: Vec<String>,
+}
+
+struct BindingWorkflowTaskRunner {
+    agents_by_id: HashMap<String, Arc<EnkiAgent>>,
+    registrations: Vec<WorkflowRegistration>,
 }
 
 enum WorkflowRequestMessage {
@@ -423,6 +397,7 @@ enum WorkflowRequestMessage {
 }
 
 pub struct EnkiAgent {
+    workflow_registration: Mutex<WorkflowRegistration>,
     request_tx: Mutex<mpsc::Sender<RunRequest>>,
 }
 
@@ -432,12 +407,12 @@ pub struct EnkiWorkflowRuntime {
 
 impl EnkiWorkflowRuntime {
     pub fn new(
-        members: Vec<EnkiWorkflowMember>,
+        agents: Vec<Arc<EnkiAgent>>,
         tasks_json: Vec<String>,
         workflows_json: Vec<String>,
         workspace_home: Option<String>,
     ) -> Self {
-        let request_tx = spawn_workflow_worker(members, tasks_json, workflows_json, workspace_home);
+        let request_tx = spawn_workflow_worker(agents, tasks_json, workflows_json, workspace_home);
         Self {
             request_tx: Mutex::new(request_tx),
         }
@@ -717,7 +692,18 @@ impl EnkiAgent {
         )
     }
 
+    pub fn configure_workflow(&self, agent_id: String, capabilities: Vec<String>) {
+        if let Ok(mut registration) = self.workflow_registration.lock() {
+            registration.agent_id = agent_id;
+            registration.capabilities = capabilities;
+        }
+    }
+
     fn from_registry(definition: AgentDefinition, workspace_home: Option<String>) -> Self {
+        let workflow_registration = WorkflowRegistration {
+            agent_id: definition.name.clone(),
+            capabilities: Vec::new(),
+        };
         let workspace_home = workspace_home.map(PathBuf::from);
         let (request_tx, request_rx) = mpsc::channel::<RunRequest>();
 
@@ -753,24 +739,20 @@ impl EnkiAgent {
                         return;
                     }
                 };
-            let runtime_instance = Runtime::new(BindingAgentRuntimeHandler { agent });
 
             for request in request_rx {
-                let response = match runtime.block_on(runtime_instance.process_detailed(
-                    RuntimeRequest::new(&request.session_id, "binding-py", &request.user_message),
+                let response = runtime.block_on(agent.run_detailed_with_context(
+                    &request.session_id,
+                    &request.user_message,
+                    request.exec_ctx,
                     request.on_step,
-                )) {
-                    Ok(result) => CoreAgentRunResult {
-                        content: result.response.content,
-                        steps: result.steps,
-                    },
-                    Err(error) => error_run_result(error),
-                };
+                ));
                 let _ = request.reply_tx.send(response);
             }
         });
 
         Self {
+            workflow_registration: Mutex::new(workflow_registration),
             request_tx: Mutex::new(request_tx),
         }
     }
@@ -819,6 +801,10 @@ impl EnkiAgent {
         memory_handler: Option<Box<dyn EnkiMemoryHandler>>,
         llm_handler: Option<Box<dyn EnkiLlmHandler>>,
     ) -> Self {
+        let workflow_registration = WorkflowRegistration {
+            agent_id: definition.name.clone(),
+            capabilities: Vec::new(),
+        };
         let workspace_home = workspace_home.map(PathBuf::from);
         let (request_tx, request_rx) = mpsc::channel::<RunRequest>();
 
@@ -880,30 +866,33 @@ impl EnkiAgent {
                     return;
                 }
             };
-            let runtime_instance = Runtime::new(BindingAgentRuntimeHandler { agent });
 
             for request in request_rx {
-                let response = match runtime.block_on(runtime_instance.process_detailed(
-                    RuntimeRequest::new(&request.session_id, "binding-py", &request.user_message),
+                let response = runtime.block_on(agent.run_detailed_with_context(
+                    &request.session_id,
+                    &request.user_message,
+                    request.exec_ctx,
                     request.on_step,
-                )) {
-                    Ok(result) => CoreAgentRunResult {
-                        content: result.response.content,
-                        steps: result.steps,
-                    },
-                    Err(error) => error_run_result(error),
-                };
+                ));
                 let _ = request.reply_tx.send(response);
             }
         });
 
         Self {
+            workflow_registration: Mutex::new(workflow_registration),
             request_tx: Mutex::new(request_tx),
         }
     }
 
     pub async fn run(&self, session_id: String, user_message: String) -> String {
-        self.run_with_trace(session_id, user_message).await.output
+        self.run_core(
+            session_id,
+            user_message,
+            AgentExecutionContext::default(),
+            None,
+        )
+        .await
+        .content
     }
 
     pub async fn run_with_trace(
@@ -911,38 +900,15 @@ impl EnkiAgent {
         session_id: String,
         user_message: String,
     ) -> EnkiAgentRunResult {
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        let request = RunRequest {
-            session_id,
-            user_message,
-            on_step: None,
-            reply_tx,
-        };
-
-        let send_result = self
-            .request_tx
-            .lock()
-            .map_err(|_| "Worker error: request mutex poisoned".to_string())
-            .and_then(|sender| {
-                sender
-                    .send(request)
-                    .map_err(|_| "Worker error: agent worker has stopped".to_string())
-            });
-
-        if let Err(message) = send_result {
-            return EnkiAgentRunResult {
-                output: message,
-                steps: Vec::new(),
-            };
-        }
-
-        reply_rx
-            .await
-            .map(EnkiAgentRunResult::from)
-            .unwrap_or_else(|_| EnkiAgentRunResult {
-                output: "Worker error: agent worker dropped reply channel".to_string(),
-                steps: Vec::new(),
-            })
+        EnkiAgentRunResult::from(
+            self.run_core(
+                session_id,
+                user_message,
+                AgentExecutionContext::default(),
+                None,
+            )
+            .await,
+        )
     }
 
     pub async fn run_with_events(
@@ -951,17 +917,42 @@ impl EnkiAgent {
         user_message: String,
         handler: Box<dyn EnkiStepHandler>,
     ) -> EnkiAgentRunResult {
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-
         let handler_arc: Arc<dyn EnkiStepHandler> = handler.into();
         let step_closure = Arc::new(move |step: CoreExecutionStep| {
             handler_arc.on_step(step.into());
         });
 
+        EnkiAgentRunResult::from(
+            self.run_core(
+                session_id,
+                user_message,
+                AgentExecutionContext::default(),
+                Some(step_closure),
+            )
+            .await,
+        )
+    }
+
+    fn workflow_registration(&self) -> Result<WorkflowRegistration, String> {
+        self.workflow_registration
+            .lock()
+            .map(|registration| registration.clone())
+            .map_err(|_| "Worker error: workflow registration mutex poisoned".to_string())
+    }
+
+    async fn run_core(
+        &self,
+        session_id: String,
+        user_message: String,
+        exec_ctx: AgentExecutionContext,
+        on_step: Option<std::sync::Arc<dyn Fn(CoreExecutionStep) + Send + Sync>>,
+    ) -> CoreAgentRunResult {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let request = RunRequest {
             session_id,
             user_message,
-            on_step: Some(step_closure),
+            exec_ctx,
+            on_step,
             reply_tx,
         };
 
@@ -976,35 +967,13 @@ impl EnkiAgent {
             });
 
         if let Err(message) = send_result {
-            return EnkiAgentRunResult {
-                output: message,
-                steps: Vec::new(),
-            };
+            return error_run_result(message);
         }
 
         reply_rx
             .await
-            .map(EnkiAgentRunResult::from)
-            .unwrap_or_else(|_| EnkiAgentRunResult {
-                output: "Worker error: agent worker dropped reply channel".to_string(),
-                steps: Vec::new(),
-            })
+            .unwrap_or_else(|_| error_run_result("Worker error: agent worker dropped reply channel"))
     }
-}
-
-fn build_workflow_definition(member: EnkiWorkflowMember) -> (String, AgentDefinition, Vec<String>) {
-    (
-        member.agent_id,
-        AgentDefinition {
-            name: member.name,
-            system_prompt_preamble: member
-                .system_prompt_preamble
-                .unwrap_or_else(|| "You are a helpful Personal Assistant agent.".to_string()),
-            model: member.model.unwrap_or_default(),
-            max_iterations: member.max_iterations.unwrap_or(20).max(1) as usize,
-        },
-        member.capabilities,
-    )
 }
 
 fn parse_json_value<T: DeserializeOwned>(json: &str, label: &str) -> Result<T, String> {
@@ -1019,8 +988,29 @@ fn json_error_payload(message: &str) -> String {
     serde_json::json!({ "error": message }).to_string()
 }
 
+fn workflow_task_failure_message(result: &CoreAgentRunResult) -> Option<String> {
+    if result
+        .steps
+        .last()
+        .is_some_and(|step| matches!(step.kind.as_str(), "failed" | "error"))
+    {
+        return Some(result.content.trim().to_string());
+    }
+
+    if result.content.trim_start().starts_with("LLM error:")
+        || result
+            .content
+            .trim_start()
+            .starts_with("Initialization error:")
+    {
+        return Some(result.content.trim().to_string());
+    }
+
+    None
+}
+
 fn spawn_workflow_worker(
-    members: Vec<EnkiWorkflowMember>,
+    agents: Vec<Arc<EnkiAgent>>,
     tasks_json: Vec<String>,
     workflows_json: Vec<String>,
     workspace_home: Option<String>,
@@ -1042,17 +1032,44 @@ fn spawn_workflow_worker(
             }
         };
 
-        let mut multi_agent_builder = MultiAgentRuntime::builder();
         let mut workflow_builder = WorkflowRuntime::builder();
 
-        if let Some(home) = workspace_home.clone() {
-            multi_agent_builder = multi_agent_builder.with_workspace_home(home.clone());
+        if let Some(home) = workspace_home {
             workflow_builder = workflow_builder.with_workspace_home(home);
         }
 
-        for member in members {
-            let (agent_id, definition, capabilities) = build_workflow_definition(member);
-            multi_agent_builder = multi_agent_builder.add_agent(agent_id, definition, capabilities);
+        let mut registrations = Vec::with_capacity(agents.len());
+        let mut agents_by_id = HashMap::with_capacity(agents.len());
+        for agent in agents {
+            let registration = match agent.workflow_registration() {
+                Ok(registration) => registration,
+                Err(error) => {
+                    fail_workflow_requests(request_rx, &error);
+                    return;
+                }
+            };
+
+            if registration.agent_id.trim().is_empty() {
+                fail_workflow_requests(
+                    request_rx,
+                    "Initialization error: workflow agent_id cannot be empty.",
+                );
+                return;
+            }
+
+            if agents_by_id
+                .insert(registration.agent_id.clone(), agent.clone())
+                .is_some()
+            {
+                let message = format!(
+                    "Initialization error: duplicate workflow agent_id '{}'.",
+                    registration.agent_id
+                );
+                fail_workflow_requests(request_rx, &message);
+                return;
+            }
+
+            registrations.push(registration);
         }
 
         for task_json in tasks_json {
@@ -1081,16 +1098,10 @@ fn spawn_workflow_worker(
             workflow_builder = workflow_builder.add_workflow(workflow);
         }
 
-        let multi_agent_runtime = match runtime.block_on(multi_agent_builder.build()) {
-            Ok(runtime_instance) => Arc::new(runtime_instance),
-            Err(error) => {
-                let message = format!("Initialization error: {error}");
-                fail_workflow_requests(request_rx, &message);
-                return;
-            }
-        };
-
-        let task_runner: Arc<dyn WorkflowTaskRunner> = multi_agent_runtime.clone();
+        let task_runner: Arc<dyn WorkflowTaskRunner> = Arc::new(BindingWorkflowTaskRunner {
+            agents_by_id,
+            registrations,
+        });
         let workflow_runtime: WorkflowRuntime =
             match runtime.block_on(workflow_builder.with_task_runner(task_runner).build()) {
                 Ok(runtime_instance) => runtime_instance,
@@ -1168,6 +1179,96 @@ fn spawn_workflow_worker(
     });
 
     request_tx
+}
+
+#[async_trait(?Send)]
+impl WorkflowTaskRunner for BindingWorkflowTaskRunner {
+    async fn run_task(
+        &self,
+        target: &TaskTarget,
+        metadata: &WorkflowToolContext,
+        workspace_dir: &std::path::Path,
+        prompt: &str,
+    ) -> Result<WorkflowTaskResult, String> {
+        let registration = match target {
+            TaskTarget::AgentId(agent_id) => self
+                .registrations
+                .iter()
+                .find(|registration| registration.agent_id == *agent_id)
+                .ok_or_else(|| format!("Workflow target agent '{}' not found.", agent_id))?,
+            TaskTarget::Capabilities(required) => {
+                let mut matches = self
+                    .registrations
+                    .iter()
+                    .filter(|registration| {
+                        required.iter().all(|required| {
+                            registration
+                                .capabilities
+                                .iter()
+                                .any(|capability| capability == required)
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                matches.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
+                match matches.as_slice() {
+                    [registration] => *registration,
+                    [] => {
+                        return Err(format!(
+                            "No agent matched workflow capabilities: {}",
+                            required.join(", ")
+                        ));
+                    }
+                    _ => {
+                        let matched_ids = matches
+                            .into_iter()
+                            .map(|registration| registration.agent_id.clone())
+                            .collect::<Vec<_>>();
+                        return Err(format!(
+                            "Multiple agents matched workflow capabilities {}: {}",
+                            required.join(", "),
+                            matched_ids.join(", ")
+                        ));
+                    }
+                }
+            }
+        };
+
+        let agent = self
+            .agents_by_id
+            .get(&registration.agent_id)
+            .ok_or_else(|| format!("Workflow target agent '{}' not found.", registration.agent_id))?;
+        let session_id = format!(
+            "wf-{}-{}-attempt-{}",
+            metadata.run_id, metadata.node_id, metadata.attempt
+        );
+        let result = agent
+            .run_core(
+                session_id.clone(),
+                prompt.to_string(),
+                AgentExecutionContext {
+                    workspace_dir: Some(workspace_dir.to_path_buf()),
+                    workflow: Some(metadata.clone()),
+                },
+                None,
+            )
+            .await;
+
+        if let Some(error) = workflow_task_failure_message(&result) {
+            return Err(error);
+        }
+
+        Ok(WorkflowTaskResult {
+            content: result.content.clone(),
+            value: serde_json::json!({
+                "content": result.content,
+                "agent_id": registration.agent_id.clone(),
+                "session_id": session_id,
+                "attempt": metadata.attempt,
+            }),
+            agent_id: registration.agent_id.clone(),
+            steps: result.steps,
+        })
+    }
 }
 
 fn fail_workflow_requests(request_rx: mpsc::Receiver<WorkflowRequestMessage>, message: &str) {
@@ -1266,3 +1367,4 @@ pub fn init_logger(level: String) {
 }
 
 uniffi::include_scaffolding!("enki");
+
