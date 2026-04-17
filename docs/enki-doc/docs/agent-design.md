@@ -234,6 +234,7 @@ All three examples keep the same Enki runtime guarantees: the Rust loop owns pha
 
 ## Related docs
 
+- [Workflow Design](/docs/workflow-design)
 - [Rust](/docs/rust)
 - [Builder CLI](/docs/builder-cli)
 - [Python](/docs/python)

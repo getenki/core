@@ -108,6 +108,8 @@ agent = Agent(
 
 ## Low-Level API
 
+For workflow orchestration from Python, see [Python Workflow](/docs/python-workflow).
+
 For multi-agent orchestration with Python `Agent` instances, see [Python Multi-Agent](/docs/python-multi-agent).
 
 Use the generated low-level API when you need exact control over tool specs and the tool handler callback:
@@ -127,6 +129,7 @@ agent = enki_py.EnkiAgent(
 ## Python docs
 
 - [Installation](/docs/installation)
+- [Python Workflow](/docs/python-workflow)
 - [Python Multi-Agent](/docs/python-multi-agent)
 - [Getting Started Guide](/docs/agent-wrapper)
 - [Memory Backends](/docs/memory-backends)

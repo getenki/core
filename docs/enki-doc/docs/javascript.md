@@ -13,6 +13,7 @@ This package is the current JavaScript surface. We are not publishing a WASM bin
 
 - `NativeEnkiAgent`
 - `NativeMultiAgentRuntime`
+- `NativeWorkflowRuntime`
 - `JsAgentRunResult`
 - `JsExecutionStep`
 - `JsAgentStatus`
@@ -245,4 +246,6 @@ npm test
 
 ## Related docs
 
+- [JavaScript Workflow](/docs/javascript-workflow)
 - [TypeScript](/docs/typescript)
+- [Builder CLI](/docs/builder-cli)
