@@ -24,6 +24,7 @@ The Rust core is responsible for:
 - Session and workspace state management
 - Memory handling
 - Tool execution
+- Workflow DAG execution with persisted run state, resume support, and intervention handling
 - Human-in-the-loop support through the intrinsic `ask_human` tool
 - Execution tracing via per-step `ExecutionStep` events
 - Provider/model resolution using the `provider::model` format
@@ -79,5 +80,6 @@ See [Builder CLI](/docs/builder-cli) for the manifest format and command flow.
 
 ## Rust docs
 
+- [Rust Workflow](/docs/rust-workflow)
 - [Builder CLI](/docs/builder-cli)
 - [Build from Source](/docs/build-from-source)

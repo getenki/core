@@ -3,11 +3,13 @@ const sidebars = {
         "intro",
         "builder-cli",
         "agent-design",
+        "workflow-design",
         {
             type: "category",
             label: "Python",
             items: [
                 "python",
+                "python-workflow",
                 "python-multi-agent",
                 "installation",
                 "agent-wrapper",
@@ -23,6 +25,7 @@ const sidebars = {
             label: "JavaScript",
             items: [
                 "javascript",
+                "javascript-workflow",
                 "javascript-multi-agent"
             ]
         },
@@ -31,6 +34,7 @@ const sidebars = {
             label: "TypeScript",
             items: [
                 "typescript",
+                "typescript-workflow",
                 "typescript-multi-agent"
             ]
         },
@@ -39,6 +43,7 @@ const sidebars = {
             label: "Rust",
             items: [
                 "rust",
+                "rust-workflow",
                 "build-from-source"
             ]
         }

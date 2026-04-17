@@ -11,6 +11,7 @@ The generated declarations currently expose:
 
 - `NativeEnkiAgent`
 - `NativeMultiAgentRuntime`
+- `NativeWorkflowRuntime`
 - `JsAgentStatus`
 - `JsAgentCard`
 - `JsMemoryKind`
@@ -155,5 +156,7 @@ const agent = NativeEnkiAgent.withToolsAndMemory(
   (): void => {},
 )
 ```
+
+For typed workflow orchestration, see [TypeScript Workflow](/docs/typescript-workflow).
 
 For typed multi-agent orchestration, see [TypeScript Multi-Agent](/docs/typescript-multi-agent).

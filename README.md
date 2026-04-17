@@ -40,12 +40,13 @@ The workspace currently contains:
 ## What This Repo Builds
 
 - A stateful agent runtime with persistent sessions and workspace-backed execution
+- A workflow runtime with DAG execution, persisted run state, resume support, and intervention handling
 - Built-in tools for `read_file`, `write_file`, and `exec`
 - Human-in-the-loop runtime support through the intrinsic `ask_human` tool
 - Execution tracing through per-step `ExecutionStep` events
 - Multi-provider LLM support via the `provider::model` format
-- Python bindings exposing low-level FFI types plus the high-level `Agent` wrapper and `MultiAgentRuntime`
-- JavaScript bindings exposing `NativeEnkiAgent`, `NativeMultiAgentRuntime`, and traced run results
+- Python bindings exposing low-level FFI types plus the high-level `Agent` wrapper, `MultiAgentRuntime`, and `EnkiWorkflowRuntime`
+- JavaScript bindings exposing `NativeEnkiAgent`, `NativeMultiAgentRuntime`, `NativeWorkflowRuntime`, and traced run results
 
 Examples of supported model strings in the current codebase:
 
@@ -179,6 +180,7 @@ These examples default to `ollama::qwen3.5:latest` unless `ENKI_MODEL` is set.
 The published docs describe two Python layers:
 
 - a generated low-level API around `EnkiAgent`, `EnkiTool`, and `EnkiToolHandler`
+- a generated low-level workflow API around `EnkiWorkflowMember` and `EnkiWorkflowRuntime`
 - a higher-level Python wrapper for more ergonomic agent usage
 
 This repo contains the low-level Rust-backed binding implementation in `crates/bindings/enki-py`.
