@@ -305,30 +305,31 @@ const recordHandler = (
 
 ## Workflow Runtime
 
-Use `NativeWorkflowRuntime` when you want to register workflow members plus JSON task and workflow definitions directly from Node.js.
+Use `NativeWorkflowRuntime` when you want to register workflow agents plus JSON task and workflow definitions directly from Node.js.
 
 ```js
-const { NativeWorkflowRuntime } = require('@getenki/ai')
+const { NativeEnkiAgent, NativeWorkflowRuntime } = require('@getenki/ai')
+
+const researcher = new NativeEnkiAgent(
+  'Researcher',
+  'Return short factual notes.',
+  'ollama::qwen3.5:latest',
+  4,
+  './.enki',
+)
+researcher.configureWorkflow('researcher', ['research'])
+
+const writer = new NativeEnkiAgent(
+  'Writer',
+  'Turn notes into a concise summary.',
+  'ollama::qwen3.5:latest',
+  4,
+  './.enki',
+)
+writer.configureWorkflow('writer', ['writing'])
 
 const runtime = new NativeWorkflowRuntime(
-  [
-    {
-      agentId: 'researcher',
-      name: 'Researcher',
-      systemPromptPreamble: 'Return short factual notes.',
-      model: 'ollama::qwen3.5:latest',
-      maxIterations: 4,
-      capabilities: ['research'],
-    },
-    {
-      agentId: 'writer',
-      name: 'Writer',
-      systemPromptPreamble: 'Turn notes into a concise summary.',
-      model: 'ollama::qwen3.5:latest',
-      maxIterations: 4,
-      capabilities: ['writing'],
-    },
-  ],
+  [researcher, writer],
   [
     JSON.stringify({
       id: 'research_topic',
@@ -354,9 +355,7 @@ const runtime = new NativeWorkflowRuntime(
         { id: 'research', kind: 'task', task_id: 'research_topic', output_key: 'research' },
         { id: 'summary', kind: 'task', task_id: 'write_summary', output_key: 'summary' },
       ],
-      edges: [
-        { from: 'research', to: 'summary', transition: { type: 'always' } },
-      ],
+      edges: [{ from: 'research', to: 'summary', transition: { type: 'always' } }],
     }),
   ],
   './.enki',
@@ -375,6 +374,36 @@ const persisted = JSON.parse(await runtime.inspectJson(response.run_id))
 console.log(persisted.status)
 ```
 
+## Human Intervention
+
+Workflow runs persist pending interventions as part of the run state, so approvals and failure escalations can pause and resume without moving state into a separate coordinator service.
+
+Each pending intervention includes:
+
+- `workflow_id`
+- `run_id`
+- `node_id`
+- `prompt`
+- `reason`
+- `response`
+- `created_at` and `resolved_at`
+
+Two built-in patterns are supported:
+
+- `human_gate` nodes pause immediately and wait for a human response
+- task nodes with `failure_policy: "pause_for_intervention"` convert a terminal failure into an intervention asking the human to `retry`, `skip`, `continue`, or `fail`
+
+The runnable TypeScript example is [`example/basic-ts/human-intervention-workflow.ts`](/I:/projects/enki/core-next/example/basic-ts/human-intervention-workflow.ts). It demonstrates:
+
+- a `human_gate` approval flow that pauses, resolves, and resumes to `approval.approved = true`
+- a missing-agent failure that pauses for intervention and resumes after a `skip` response
+
+The runtime interaction loop is:
+
+1. `startJson(...)` returns a paused workflow response
+2. `inspectJson(runId)` exposes `pending_interventions`
+3. `submitInterventionJson(runId, interventionId, response)` resolves the intervention
+4. `resumeJson(runId)` continues the persisted run
 ## Tools And Memory Example
 
 The repository examples in [`example/basic-js/index.js`](/I:/projects/enki/core-next/example/basic-js/index.js) and [`example/basic-ts/index.ts`](/I:/projects/enki/core-next/example/basic-ts/index.ts) use `NativeEnkiAgent.withToolsAndMemory(...)` with:
@@ -544,3 +573,5 @@ Useful scripts:
 - `npm test`: run the AVA test suite
 - `npm run lint`: run `oxlint`
 - `npm run format`: run Prettier, `cargo fmt`, and `taplo format`
+
+
