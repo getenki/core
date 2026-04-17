@@ -34,8 +34,11 @@ test('test_all: the package entrypoint exposes NativeMultiAgentRuntime', (t) => 
 })
 
 test('test_all: the package entrypoint exposes NativeWorkflowRuntime', (t) => {
+  const agent = new NativeEnkiAgent('Agent', 'Prompt', 'ollama::llama3.2:latest', 4, './test')
+  agent.configureWorkflow('agent-1', [])
+
   const runtime = new NativeWorkflowRuntime(
-    [{agentId: 'agent-1', name: 'Agent', model: 'ollama::llama3.2:latest', capabilities: []}],
+    [agent],
     [],
     [],
     './test',
@@ -44,3 +47,4 @@ test('test_all: the package entrypoint exposes NativeWorkflowRuntime', (t) => {
   t.is(typeof runtime.listWorkflowsJson, 'function')
   t.is(typeof runtime.startJson, 'function')
 })
+
