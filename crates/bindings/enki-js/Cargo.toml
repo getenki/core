@@ -1,5 +1,5 @@
 [package]
-authors = ["LongYinan <lynweklm@gmail.com>"]
+authors = ["Dewmal <dewmal@syigen.com>","Sadika sadika@syigen.com"]
 edition.workspace = true
 name = "enki_js"
 version.workspace = true
