@@ -8,6 +8,7 @@ slug: /python-workflow
 Python exposes the Rust workflow runtime through the generated low-level bindings.
 
 Use `EnkiWorkflowRuntime` when you want to register workflow agents, tasks, and workflow definitions directly from Python. The recommended path is to build agents with the high-level `Agent` wrapper so your Python-side LLM provider, tools, and memories are attached, then convert them into workflow-ready low-level agents with `as_workflow_agent(...)`.
+
 ## Recommended pattern
 
 - Build each participant as `enki_py.Agent(...)`
@@ -58,11 +59,13 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+See the full runnable workflow sample in `example/enki-py/agent_workflow.py`.
+
 ## Why not construct raw `EnkiAgent` objects?
 
 If you construct low-level `EnkiAgent(...)` values directly, they do not automatically gain a Python-side LLM provider. That can lead to workflow runs returning `Initialization error: No built-in LLM provider is available...` instead of real agent output.
 
-For most Python usage, `Agent(...).as_workflow_agent(...)` is the safer default. See `example/enki-py/agent_workflow.py` for the full runnable sample, including a custom `OllamaProvider` fallback.
+For most Python usage, `Agent(...).as_workflow_agent(...)` is the safer default.
 
 ## Human Intervention
 
@@ -83,17 +86,21 @@ Two common patterns are supported:
 - `human_gate` nodes pause the workflow immediately and create an intervention request
 - `failure_policy: "pause_for_intervention"` pauses a failed task and asks the human whether to `retry`, `skip`, `continue`, or `fail`
 
-The full runnable example is [`example/enki-py/human_intervention_workflow.py`](/I:/projects/enki/core-next/example/enki-py/human_intervention_workflow.py). It shows both:
+The runnable example is `example/enki-py/human_intervention_workflow.py`. It is interactive and waits on stdin before resolving each intervention.
+
+It demonstrates:
 
 - a first-class `human_gate` approval flow
-- a failed task escalating into an intervention, then resuming after a `skip` response
+- a failed task escalating into an intervention, then resuming after a human response such as `skip`
 
-The core interaction loop is:
+The interaction loop is:
 
 1. `start_json(...)` returns a paused workflow response
 2. `inspect_json(run_id)` exposes `pending_interventions`
-3. `submit_intervention_json(run_id, intervention_id, response)` resolves the chosen intervention
-4. `resume_json(run_id)` continues the workflow from persisted state
+3. read the intervention prompt and collect human input
+4. `submit_intervention_json(run_id, intervention_id, response)` resolves the chosen intervention
+5. `resume_json(run_id)` continues the workflow from persisted state
+
 Supported workflow methods:
 
 - `list_workflows_json()`
@@ -102,10 +109,4 @@ Supported workflow methods:
 - `start_json(request_json)`
 - `resume_json(run_id)`
 - `submit_intervention_json(run_id, intervention_id, response=None)`
-
-
-
-
-
-
 

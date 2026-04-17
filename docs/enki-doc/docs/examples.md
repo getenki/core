@@ -5,7 +5,7 @@ slug: /examples
 
 # Examples
 
-These examples show the main ways to use `enki-py`, including the newer multi-agent flows added in the current workspace.
+These examples show the main ways to use Enki across Python, JavaScript, and TypeScript, including workflow orchestration and human-in-the-loop execution.
 
 ## Decorator-style tools
 
@@ -86,30 +86,29 @@ See [Memory Backends](/docs/memory-backends) for the API and [Memory Examples](/
 
 Custom memory callbacks support both synchronous functions and `async def` methods.
 
-## File-organization review agent
-
-A larger end-to-end agent can combine:
-
-- a typed dependency object with a review root
-- multiple filesystem-oriented tools
-- safe path resolution inside the review root
-- a reusable `review_folder()` helper around `agent.run_sync()`
-
-## Support triage agent
-
-A useful production-style pattern is a support triage agent that:
-
-- classifies issue severity
-- maps the problem to a subsystem such as `billing`, `auth`, or `api`
-- uses tools to pull runbook context before answering
-- returns a concise recommendation for the human operator
-
-See [Agent Design](/docs/agent-design) for a full example of this use case and how it maps onto the Enki runtime model.
-
 ## Repository examples
 
-The repository currently includes these runnable Python examples:
+The repository currently includes these runnable examples:
+
+### Python
 
 - `example/enki-py/simple_agent.py`: minimal high-level `Agent` usage with `run_sync()`
 - `example/enki-py/simple_multi_agent.py`: coordinator plus researcher setup with `MultiAgentRuntime`
 - `example/enki-py/multi_agent_with_memory_and_tools.py`: shared memory backend, decorator tools, and delegated multi-agent execution
+- `example/enki-py/agent_workflow.py`: workflow runtime example using `Agent(...).as_workflow_agent(...)`
+- `example/enki-py/human_intervention_workflow.py`: interactive workflow example showing `human_gate` pauses and failure escalation interventions
+
+### TypeScript and JavaScript
+
+- `example/basic-ts/index.ts`: basic TypeScript multi-agent runtime example
+- `example/basic-ts/multi-agent-tools-memory.ts`: TypeScript example with researcher/coordinator agents, tool calling, and shared memory
+- `example/basic-ts/agent-workflow.ts`: TypeScript workflow runtime example using `NativeEnkiAgent` and `NativeWorkflowRuntime`
+- `example/basic-ts/human-intervention-workflow.ts`: interactive TypeScript workflow example showing `human_gate` pauses and failure escalation interventions
+- `example/basic-js/index.js`: basic JavaScript multi-agent runtime example
+- `example/basic-js/multi-agent-tools-memory.js`: JavaScript example with researcher/coordinator agents, tool calling, and shared memory
+
+For workflow-specific docs, see:
+
+- [Python Workflow](/docs/python-workflow)
+- [JavaScript Workflow](/docs/javascript-workflow)
+- [TypeScript Workflow](/docs/typescript-workflow)
