@@ -66,7 +66,6 @@ pub struct EnkiMemoryModule {
     pub name: String,
 }
 
-
 pub trait EnkiToolHandler: Send + Sync {
     fn execute(
         &self,
@@ -970,9 +969,9 @@ impl EnkiAgent {
             return error_run_result(message);
         }
 
-        reply_rx
-            .await
-            .unwrap_or_else(|_| error_run_result("Worker error: agent worker dropped reply channel"))
+        reply_rx.await.unwrap_or_else(|_| {
+            error_run_result("Worker error: agent worker dropped reply channel")
+        })
     }
 }
 
@@ -1236,7 +1235,12 @@ impl WorkflowTaskRunner for BindingWorkflowTaskRunner {
         let agent = self
             .agents_by_id
             .get(&registration.agent_id)
-            .ok_or_else(|| format!("Workflow target agent '{}' not found.", registration.agent_id))?;
+            .ok_or_else(|| {
+                format!(
+                    "Workflow target agent '{}' not found.",
+                    registration.agent_id
+                )
+            })?;
         let session_id = format!(
             "wf-{}-{}-attempt-{}",
             metadata.run_id, metadata.node_id, metadata.attempt
@@ -1367,4 +1371,3 @@ pub fn init_logger(level: String) {
 }
 
 uniffi::include_scaffolding!("enki");
-

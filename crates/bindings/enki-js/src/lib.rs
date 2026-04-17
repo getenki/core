@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use core_next::agent::{
-  Agent as CoreAgent, AgentDefinition, AgentExecutionContext,
-  AgentRunResult as CoreAgentRunResult, ExecutionStep as CoreExecutionStep,
+  Agent as CoreAgent, AgentDefinition, AgentExecutionContext, AgentRunResult as CoreAgentRunResult,
+  ExecutionStep as CoreExecutionStep,
 };
 use core_next::memory::{
   MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
@@ -123,7 +123,6 @@ struct JsMemoryProvider {
 struct JsMemoryRouter {
   provider_names: Vec<String>,
 }
-
 
 struct JsMemoryHandlers {
   record: MemoryRecordHandler,
@@ -444,7 +443,6 @@ impl MemoryRouter for JsMemoryRouter {
   }
 }
 
-
 #[napi]
 impl NativeWorkflowRuntime {
   #[napi(constructor)]
@@ -458,7 +456,8 @@ impl NativeWorkflowRuntime {
       .into_iter()
       .map(|agent| Arc::clone(&agent.inner))
       .collect();
-    let request_tx = spawn_workflow_worker(agent_handles, tasks_json, workflows_json, workspace_home)?;
+    let request_tx =
+      spawn_workflow_worker(agent_handles, tasks_json, workflows_json, workspace_home)?;
 
     Ok(Self {
       inner: Arc::new(WorkflowHandle {
@@ -673,7 +672,11 @@ impl NativeEnkiAgent {
   }
 
   #[napi(js_name = "configureWorkflow")]
-  pub fn configure_workflow(&self, agent_id: String, capabilities: Vec<String>) -> napi::Result<()> {
+  pub fn configure_workflow(
+    &self,
+    agent_id: String,
+    capabilities: Vec<String>,
+  ) -> napi::Result<()> {
     self.inner.configure_workflow(agent_id, capabilities)
   }
 }
@@ -814,10 +817,9 @@ impl NativeEnkiAgent {
 
 impl AgentHandle {
   fn configure_workflow(&self, agent_id: String, capabilities: Vec<String>) -> napi::Result<()> {
-    let mut registration = self
-      .workflow_registration
-      .lock()
-      .map_err(|_| napi::Error::from_reason("Worker error: workflow registration mutex poisoned".to_string()))?;
+    let mut registration = self.workflow_registration.lock().map_err(|_| {
+      napi::Error::from_reason("Worker error: workflow registration mutex poisoned".to_string())
+    })?;
 
     registration.agent_id = agent_id;
     registration.capabilities = capabilities;
@@ -829,7 +831,9 @@ impl AgentHandle {
       .workflow_registration
       .lock()
       .map(|registration| registration.clone())
-      .map_err(|_| napi::Error::from_reason("Worker error: workflow registration mutex poisoned".to_string()))
+      .map_err(|_| {
+        napi::Error::from_reason("Worker error: workflow registration mutex poisoned".to_string())
+      })
   }
 
   fn run(&self, session_id: String, user_message: String) -> napi::Result<CoreAgentRunResult> {
@@ -1731,7 +1735,12 @@ impl WorkflowTaskRunner for BindingWorkflowTaskRunner {
     let agent = self
       .agents_by_id
       .get(&registration.agent_id)
-      .ok_or_else(|| format!("Workflow target agent '{}' not found.", registration.agent_id))?;
+      .ok_or_else(|| {
+        format!(
+          "Workflow target agent '{}' not found.",
+          registration.agent_id
+        )
+      })?;
     let session_id = format!(
       "wf-{}-{}-attempt-{}",
       metadata.run_id, metadata.node_id, metadata.attempt
