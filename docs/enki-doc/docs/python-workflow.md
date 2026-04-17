@@ -7,116 +7,62 @@ slug: /python-workflow
 
 Python exposes the Rust workflow runtime through the generated low-level bindings.
 
-Use `EnkiWorkflowRuntime` when you want to register workflow agents, tasks, and workflow definitions directly from Python. The current surface is low-level and async: agents are configured first, tasks and workflows are passed in as JSON strings, and workflow responses are returned as JSON strings.
+Use `EnkiWorkflowRuntime` when you want to register workflow agents, tasks, and workflow definitions directly from Python. The recommended path is to build agents with the high-level `Agent` wrapper so your Python-side LLM provider, tools, and memories are attached, then convert them into workflow-ready low-level agents with `as_workflow_agent(...)`.
+## Recommended pattern
+
+- Build each participant as `enki_py.Agent(...)`
+- Pass `llm=` explicitly when you want a custom provider, or let `LiteLlmProvider()` handle supported models
+- Convert each configured agent with `agent.as_workflow_agent(agent_id=..., capabilities=[...])`
+- Pass those converted low-level agents into `EnkiWorkflowRuntime(...)`
 
 ```python
 import asyncio
 import json
-
 import enki_py
 
 
 async def main() -> None:
-    researcher = enki_py.EnkiAgent(
+    researcher = enki_py.Agent(
+        "ollama::qwen3.5:latest",
         name="Researcher",
-        system_prompt_preamble="Return short factual notes.",
-        model="ollama::qwen3.5:latest",
-        max_iterations=4,
-        workspace_home="./.enki",
+        instructions="Return short factual notes.",
+        llm=enki_py.LiteLlmProvider(),
     )
-    researcher.configure_workflow(
-        agent_id="researcher",
-        capabilities=["research"],
-    )
-
-    writer = enki_py.EnkiAgent(
+    writer = enki_py.Agent(
+        "ollama::qwen3.5:latest",
         name="Writer",
-        system_prompt_preamble="Turn notes into a concise summary.",
-        model="ollama::qwen3.5:latest",
-        max_iterations=4,
-        workspace_home="./.enki",
+        instructions="Turn notes into a concise summary.",
+        llm=enki_py.LiteLlmProvider(),
     )
-    writer.configure_workflow(
-        agent_id="writer",
-        capabilities=["writing"],
-    )
-
-    tasks_json = [
-        json.dumps(
-            {
-                "id": "research_topic",
-                "target": {"type": "capabilities", "value": ["research"]},
-                "prompt": "Research {{topic}} and return 3 concise bullet points.",
-                "input_bindings": {"topic": "input.topic"},
-            }
-        ),
-        json.dumps(
-            {
-                "id": "write_summary",
-                "target": {"type": "agent_id", "value": "writer"},
-                "prompt": "Write a short summary for {{topic}} using {{research.content}}",
-                "input_bindings": {
-                    "topic": "input.topic",
-                    "research": "research",
-                },
-            }
-        ),
-    ]
-
-    workflows_json = [
-        json.dumps(
-            {
-                "id": "research-to-summary",
-                "name": "Research To Summary",
-                "nodes": [
-                    {
-                        "id": "research",
-                        "kind": "task",
-                        "task_id": "research_topic",
-                        "output_key": "research",
-                    },
-                    {
-                        "id": "summary",
-                        "kind": "task",
-                        "task_id": "write_summary",
-                        "output_key": "summary",
-                    },
-                ],
-                "edges": [
-                    {
-                        "from": "research",
-                        "to": "summary",
-                        "transition": {"type": "always"},
-                    }
-                ],
-            }
-        )
-    ]
 
     runtime = enki_py.EnkiWorkflowRuntime(
-        agents=[researcher, writer],
-        tasks_json=tasks_json,
-        workflows_json=workflows_json,
+        agents=[
+            researcher.as_workflow_agent(
+                agent_id="researcher",
+                capabilities=["research"],
+            ),
+            writer.as_workflow_agent(
+                agent_id="writer",
+                capabilities=["writing"],
+            ),
+        ],
+        tasks_json=[...],
+        workflows_json=[...],
         workspace_home="./.enki",
     )
 
-    response = json.loads(
-        await runtime.start_json(
-            json.dumps(
-                {
-                    "workflow_id": "research-to-summary",
-                    "input": {"topic": "agent workflows in enki-py"},
-                }
-            )
-        )
-    )
-
-    persisted = json.loads(await runtime.inspect_json(response["run_id"]))
-    print(persisted["status"])
+    response = json.loads(await runtime.start_json(json.dumps({...})))
+    print(response["status"])
 
 
 asyncio.run(main())
 ```
+
+## Why not construct raw `EnkiAgent` objects?
+
+If you construct low-level `EnkiAgent(...)` values directly, they do not automatically gain a Python-side LLM provider. That can lead to workflow runs returning `Initialization error: No built-in LLM provider is available...` instead of real agent output.
+
+For most Python usage, `Agent(...).as_workflow_agent(...)` is the safer default. See `example/enki-py/agent_workflow.py` for the full runnable sample, including a custom `OllamaProvider` fallback.
 
 Supported workflow methods:
 
@@ -126,3 +72,9 @@ Supported workflow methods:
 - `start_json(request_json)`
 - `resume_json(run_id)`
 - `submit_intervention_json(run_id, intervention_id, response=None)`
+
+
+
+
+
+

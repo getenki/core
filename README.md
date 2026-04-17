@@ -180,7 +180,7 @@ These examples default to `ollama::qwen3.5:latest` unless `ENKI_MODEL` is set.
 The published docs describe two Python layers:
 
 - a generated low-level API around `EnkiAgent`, `EnkiTool`, and `EnkiToolHandler`
-- a generated low-level workflow API around `EnkiAgent.configure_workflow(...)` and `EnkiWorkflowRuntime`
+- a generated workflow API around `EnkiWorkflowRuntime`, with the recommended Python path being `Agent(...).as_workflow_agent(...)`
 - a higher-level Python wrapper for more ergonomic agent usage
 
 This repo contains the low-level Rust-backed binding implementation in `crates/bindings/enki-py`.
@@ -212,3 +212,4 @@ The `test/.atomiagent/...` fixtures show the expected on-disk layout.
 ## License
 
 This project is licensed under the terms of the [LICENSE](LICENSE) file.
+
