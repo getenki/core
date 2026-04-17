@@ -7,7 +7,7 @@ slug: /python-workflow
 
 Python exposes the Rust workflow runtime through the generated low-level bindings.
 
-Use `EnkiWorkflowRuntime` when you want to register workflow members, tasks, and workflow definitions directly from Python. The current surface is low-level and async: tasks and workflows are passed in as JSON strings, and workflow responses are returned as JSON strings.
+Use `EnkiWorkflowRuntime` when you want to register workflow agents, tasks, and workflow definitions directly from Python. The current surface is low-level and async: agents are configured first, tasks and workflows are passed in as JSON strings, and workflow responses are returned as JSON strings.
 
 ```python
 import asyncio
@@ -17,24 +17,29 @@ import enki_py
 
 
 async def main() -> None:
-    members = [
-        enki_py.EnkiWorkflowMember(
-            agent_id="researcher",
-            name="Researcher",
-            system_prompt_preamble="Return short factual notes.",
-            model="ollama::qwen3.5:latest",
-            max_iterations=4,
-            capabilities=["research"],
-        ),
-        enki_py.EnkiWorkflowMember(
-            agent_id="writer",
-            name="Writer",
-            system_prompt_preamble="Turn notes into a concise summary.",
-            model="ollama::qwen3.5:latest",
-            max_iterations=4,
-            capabilities=["writing"],
-        ),
-    ]
+    researcher = enki_py.EnkiAgent(
+        name="Researcher",
+        system_prompt_preamble="Return short factual notes.",
+        model="ollama::qwen3.5:latest",
+        max_iterations=4,
+        workspace_home="./.enki",
+    )
+    researcher.configure_workflow(
+        agent_id="researcher",
+        capabilities=["research"],
+    )
+
+    writer = enki_py.EnkiAgent(
+        name="Writer",
+        system_prompt_preamble="Turn notes into a concise summary.",
+        model="ollama::qwen3.5:latest",
+        max_iterations=4,
+        workspace_home="./.enki",
+    )
+    writer.configure_workflow(
+        agent_id="writer",
+        capabilities=["writing"],
+    )
 
     tasks_json = [
         json.dumps(
@@ -89,7 +94,7 @@ async def main() -> None:
     ]
 
     runtime = enki_py.EnkiWorkflowRuntime(
-        members=members,
+        agents=[researcher, writer],
         tasks_json=tasks_json,
         workflows_json=workflows_json,
         workspace_home="./.enki",
@@ -100,7 +105,7 @@ async def main() -> None:
             json.dumps(
                 {
                     "workflow_id": "research-to-summary",
-                    "input": {"topic": "workflow bindings in enki-py"},
+                    "input": {"topic": "agent workflows in enki-py"},
                 }
             )
         )
