@@ -58,6 +58,10 @@ callback interface EnkiStepHandler {
   void on_step(EnkiExecutionStep step);
 };
 
+callback interface EnkiAgentLoopHandler {
+  string run(string request_json);
+};
+
 interface EnkiWorkflowRuntime {
   constructor(
     sequence<EnkiAgent> agents,
@@ -188,4 +192,8 @@ interface EnkiAgent {
   EnkiAgentRunResult run_with_events(string session_id, string user_message, EnkiStepHandler handler);
 
   void configure_workflow(string agent_id, sequence<string> capabilities);
+
+  void set_agent_loop_handler(EnkiAgentLoopHandler handler);
+
+  void clear_agent_loop_handler();
 };

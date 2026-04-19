@@ -6,7 +6,7 @@ use crate::agent::core::Agent;
 use crate::agent::types::{
     AgentExecutionContext, AgentRunResult, ExecutionStep, StepOutcome, ToolCallTrace,
 };
-use crate::message::{Message, next_request_id};
+use crate::message::{IndexedValue, Message, next_request_id};
 use crate::tooling::types::{AskHumanFn, ToolContext};
 use std::sync::Arc;
 
@@ -139,6 +139,94 @@ pub enum LoopDirective {
         next_phase: LoopPhase,
     },
     Final(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallbackAgentLoopRequest {
+    pub session_id: String,
+    pub user_message: String,
+    pub agent_name: String,
+    pub model: String,
+    pub max_iterations: usize,
+    pub system_prompt: String,
+    pub messages: Vec<Value>,
+    pub tools: Value,
+    pub agent_dir: String,
+    pub workspace_dir: String,
+    pub sessions_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CallbackAgentLoopResponse {
+    #[serde(default, alias = "output")]
+    pub content: String,
+    #[serde(default)]
+    pub steps: Vec<ExecutionStep>,
+    #[serde(default)]
+    pub messages: Option<Vec<Value>>,
+}
+
+pub trait ExternalAgentLoopHandler: Send + Sync {
+    fn run(&self, request_json: String) -> String;
+}
+
+pub struct CallbackAgentLoop {
+    handler: Arc<dyn ExternalAgentLoopHandler>,
+}
+
+impl CallbackAgentLoop {
+    pub fn new(handler: Arc<dyn ExternalAgentLoopHandler>) -> Self {
+        Self { handler }
+    }
+
+    fn system_prompt_from_messages(&self, messages: &[Message]) -> String {
+        messages
+            .iter()
+            .find_map(|message| {
+                let value = Value::from(message);
+                let role = value.get("role").and_then(Value::as_str)?;
+                if role != "system" {
+                    return None;
+                }
+                value
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_default()
+    }
+
+    fn serialize_messages(&self, messages: &[Message]) -> Vec<Value> {
+        messages.iter().map(Value::from).collect()
+    }
+
+    fn deserialize_messages(&self, values: Vec<Value>) -> Result<Vec<Message>, String> {
+        values
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                Message::try_from(IndexedValue { index, value }).map_err(|_| {
+                    format!("Invalid custom loop message payload at index {}", index + 1)
+                })
+            })
+            .collect()
+    }
+
+    fn parse_response(&self, raw: String) -> Result<CallbackAgentLoopResponse, String> {
+        if raw.trim().is_empty() {
+            return Err("Custom agent loop returned an empty response.".to_string());
+        }
+
+        if let Ok(parsed) = serde_json::from_str::<CallbackAgentLoopResponse>(&raw) {
+            return Ok(parsed);
+        }
+
+        Ok(CallbackAgentLoopResponse {
+            content: raw,
+            steps: Vec::new(),
+            messages: None,
+        })
+    }
 }
 
 pub struct DefaultAgentLoop;
@@ -620,5 +708,210 @@ impl AgentLoop for DefaultAgentLoop {
                 }
             }
         }
+    }
+}
+
+#[async_trait(?Send)]
+impl AgentLoop for CallbackAgentLoop {
+    async fn run_detailed_with_human_and_context(
+        &self,
+        agent: &Agent,
+        session_id: &str,
+        user_message: &str,
+        exec_ctx: AgentExecutionContext,
+        on_step: Option<std::sync::Arc<dyn Fn(ExecutionStep) + Send + Sync>>,
+        human: Option<Arc<dyn AskHumanFn>>,
+    ) -> AgentRunResult {
+        let default_loop = DefaultAgentLoop;
+        let mut ctx = agent.workspace.tool_context_with_options(
+            session_id,
+            exec_ctx.workspace_dir.clone(),
+            exec_ctx.workflow.clone(),
+        );
+        ctx.human = human;
+
+        let mut steps = Vec::new();
+        let mut messages = match default_loop
+            .initialize_messages(agent, session_id, user_message, &exec_ctx)
+            .await
+        {
+            Ok(messages) => messages,
+            Err(error) => {
+                default_loop.push_step(
+                    on_step.as_ref(),
+                    &mut steps,
+                    &LoopPhase::Understand,
+                    "error",
+                    format!("Failed to initialize session: {error}"),
+                );
+                return AgentRunResult {
+                    content: error,
+                    steps,
+                };
+            }
+        };
+
+        let request = CallbackAgentLoopRequest {
+            session_id: session_id.to_string(),
+            user_message: user_message.to_string(),
+            agent_name: agent.definition.name.clone(),
+            model: agent.definition.model.clone(),
+            max_iterations: agent.definition.max_iterations,
+            system_prompt: self.system_prompt_from_messages(&messages),
+            messages: self.serialize_messages(&messages),
+            tools: agent.tool_registry.catalog_json(),
+            agent_dir: ctx.agent_dir.to_string_lossy().into_owned(),
+            workspace_dir: ctx.workspace_dir.to_string_lossy().into_owned(),
+            sessions_dir: ctx.sessions_dir.to_string_lossy().into_owned(),
+        };
+
+        let request_json = match serde_json::to_string(&request) {
+            Ok(request_json) => request_json,
+            Err(error) => {
+                let content = format!("Custom loop request error: {error}");
+                default_loop.push_step(
+                    on_step.as_ref(),
+                    &mut steps,
+                    &LoopPhase::Understand,
+                    "error",
+                    content.clone(),
+                );
+                return default_loop
+                    .finalize_failure(
+                        agent,
+                        session_id,
+                        user_message,
+                        &mut messages,
+                        &ExecutionState::default(),
+                        content,
+                        steps,
+                    )
+                    .await;
+            }
+        };
+
+        let response = match self.parse_response(self.handler.run(request_json)) {
+            Ok(response) => response,
+            Err(error) => {
+                default_loop.push_step(
+                    on_step.as_ref(),
+                    &mut steps,
+                    &LoopPhase::Act,
+                    "error",
+                    error.clone(),
+                );
+                return default_loop
+                    .finalize_failure(
+                        agent,
+                        session_id,
+                        user_message,
+                        &mut messages,
+                        &ExecutionState::default(),
+                        error,
+                        steps,
+                    )
+                    .await;
+            }
+        };
+
+        for step in &response.steps {
+            if let Some(on_step_cb) = on_step.as_ref() {
+                on_step_cb(step.clone());
+            }
+        }
+        steps.extend(response.steps.clone());
+
+        let mut content = response.content.trim().to_string();
+        if content.is_empty() {
+            content = response
+                .messages
+                .as_ref()
+                .and_then(|messages| {
+                    messages.iter().rev().find_map(|message| {
+                        let role = message.get("role").and_then(Value::as_str)?;
+                        if role != "assistant" {
+                            return None;
+                        }
+                        message
+                            .get("content")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|content| !content.is_empty())
+                            .map(str::to_string)
+                    })
+                })
+                .unwrap_or_default();
+        }
+        if content.is_empty() {
+            let error = "Custom loop returned an empty final response.".to_string();
+            default_loop.push_step(
+                on_step.as_ref(),
+                &mut steps,
+                &LoopPhase::Finalize,
+                "error",
+                error.clone(),
+            );
+            return default_loop
+                .finalize_failure(
+                    agent,
+                    session_id,
+                    user_message,
+                    &mut messages,
+                    &ExecutionState::default(),
+                    error,
+                    steps,
+                )
+                .await;
+        }
+
+        if let Some(custom_messages) = response.messages {
+            match self.deserialize_messages(custom_messages) {
+                Ok(deserialized) => messages = deserialized,
+                Err(error) => {
+                    default_loop.push_step(
+                        on_step.as_ref(),
+                        &mut steps,
+                        &LoopPhase::Finalize,
+                        "error",
+                        error.clone(),
+                    );
+                    return default_loop
+                        .finalize_failure(
+                            agent,
+                            session_id,
+                            user_message,
+                            &mut messages,
+                            &ExecutionState::default(),
+                            error,
+                            steps,
+                        )
+                        .await;
+                }
+            }
+        } else {
+            Agent::push_out_message(
+                &mut messages,
+                serde_json::json!({
+                    "role": "assistant",
+                    "content": content.clone(),
+                }),
+            );
+        }
+
+        default_loop
+            .finalize_success(
+                agent,
+                session_id,
+                user_message,
+                &mut messages,
+                &ExecutionState {
+                    phase: LoopPhase::Finalize,
+                    budget: BudgetState::default(),
+                    last_error: None,
+                },
+                content,
+                steps,
+            )
+            .await
     }
 }

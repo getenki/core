@@ -10,6 +10,7 @@ class FakeEnkiAgent:
     def __init__(self, handler=None, llm_handler=None):
         self.handler = handler
         self.llm_handler = llm_handler
+        self.agent_loop_handler = None
 
     @classmethod
     def with_tools(cls, **kwargs):
@@ -36,7 +37,36 @@ class FakeEnkiAgent:
         cls.last_kwargs = kwargs
         return cls(kwargs["tool_handler"], kwargs["llm_handler"])
 
+    def set_agent_loop_handler(self, handler):
+        self.agent_loop_handler = handler
+
+    def clear_agent_loop_handler(self):
+        self.agent_loop_handler = None
+
     async def run(self, session_id: str, user_message: str) -> str:
+        if self.agent_loop_handler is not None:
+            raw = self.agent_loop_handler.run(
+                json.dumps(
+                    {
+                        "session_id": session_id,
+                        "user_message": user_message,
+                        "agent_name": FakeEnkiAgent.last_kwargs["name"],
+                        "model": FakeEnkiAgent.last_kwargs["model"],
+                        "max_iterations": FakeEnkiAgent.last_kwargs["max_iterations"],
+                        "system_prompt": FakeEnkiAgent.last_kwargs["system_prompt_preamble"],
+                        "messages": [{"role": "user", "content": user_message}],
+                        "tools": {},
+                        "agent_dir": "",
+                        "workspace_dir": "",
+                        "sessions_dir": "",
+                    }
+                )
+            )
+            payload = json.loads(raw) if raw.startswith("{") else raw
+            if isinstance(payload, dict):
+                return payload["content"]
+            return payload
+
         if self.llm_handler is not None:
             raw = self.llm_handler.complete(
                 FakeEnkiAgent.last_kwargs["model"],
@@ -244,6 +274,38 @@ def test_wrapper_embeds_custom_agentic_loop_in_prompt(monkeypatch):
         "1. Think.\n2. Use tools sparingly.\n3. Answer.\n"
         "</enki:agentic-loop>"
     )
+
+
+def test_wrapper_supports_custom_agent_loop_handler(monkeypatch):
+    monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
+    monkeypatch.setattr(agent_module, "LiteLlmProvider", FakeLiteLlmProvider)
+
+    observed = {}
+
+    def custom_loop(request: agent_module.AgentLoopRequest[str]) -> agent_module.AgentLoopResult:
+        observed["deps"] = request.deps
+        observed["message"] = request.user_message
+        return agent_module.AgentLoopResult(
+            output=f"custom:{request.user_message}:{request.deps}",
+            steps=[
+                agent_module.ExecutionStep(
+                    index=1,
+                    phase="Custom",
+                    kind="final",
+                    detail="Handled in Python loop",
+                )
+            ],
+        )
+
+    agent = agent_module.Agent(
+        "default-model",
+        deps_type=str,
+        agent_loop_handler=custom_loop,
+    )
+    result = agent.run_sync("hello", deps="Anne")
+
+    assert result.output == "custom:hello:Anne"
+    assert observed == {"deps": "Anne", "message": "hello"}
 
 
 def test_litellm_provider_normalizes_completion(monkeypatch):

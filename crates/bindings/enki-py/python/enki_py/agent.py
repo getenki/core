@@ -20,6 +20,7 @@ try:
     from .enki_py import EnkiMemoryModule as _LowLevelMemoryModule
     from .enki_py import EnkiToolHandler
     from .enki_py import EnkiStepHandler
+    from .enki_py import EnkiAgentLoopHandler
     from .enki_py import EnkiExecutionStep as _LowLevelExecutionStep
 except ImportError:  # pragma: no cover
     class _LowLevelEnkiAgent:  # type: ignore[override]
@@ -52,6 +53,10 @@ except ImportError:  # pragma: no cover
 
 
     class EnkiMemoryHandler:  # type: ignore[override]
+        pass
+
+
+    class EnkiAgentLoopHandler:  # type: ignore[override]
         pass
 try:
     from .enki_py import EnkiLlmHandler
@@ -97,6 +102,29 @@ class ExecutionStep:
 class AgentRunResult:
     output: str
     steps: list[ExecutionStep]
+
+
+@dataclass(frozen=True)
+class AgentLoopRequest(Generic[DepsT]):
+    session_id: str
+    user_message: str
+    agent_name: str
+    model: str
+    max_iterations: int
+    system_prompt: str
+    messages: list[dict[str, Any]]
+    tools: dict[str, Any]
+    agent_dir: str
+    workspace_dir: str
+    sessions_dir: str
+    deps: DepsT | None = None
+
+
+@dataclass(frozen=True)
+class AgentLoopResult:
+    output: str
+    steps: list[ExecutionStep]
+    messages: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -487,6 +515,63 @@ class _PythonLlmHandler(EnkiLlmHandler):
         return json.dumps(result)
 
 
+class _PythonAgentLoopHandler(EnkiAgentLoopHandler):
+    def __init__(
+            self,
+            tool_handler: "_PythonToolHandler",
+            hook: Callable[[AgentLoopRequest[Any]], Any],
+    ) -> None:
+        self._tool_handler = tool_handler
+        self._hook = hook
+
+    def run(self, request_json: str) -> str:
+        payload = json.loads(request_json) if request_json else {}
+        request = AgentLoopRequest(
+            session_id=str(payload.get("session_id", "")),
+            user_message=str(payload.get("user_message", "")),
+            agent_name=str(payload.get("agent_name", "")),
+            model=str(payload.get("model", "")),
+            max_iterations=int(payload.get("max_iterations", 0) or 0),
+            system_prompt=str(payload.get("system_prompt", "")),
+            messages=list(payload.get("messages") or []),
+            tools=dict(payload.get("tools") or {}),
+            agent_dir=str(payload.get("agent_dir", "")),
+            workspace_dir=str(payload.get("workspace_dir", "")),
+            sessions_dir=str(payload.get("sessions_dir", "")),
+            deps=self._tool_handler.get_deps(),
+        )
+
+        result = _resolve_callback_result(self._hook(request))
+        if isinstance(result, AgentLoopResult):
+            return json.dumps(
+                {
+                    "content": result.output,
+                    "steps": [step.__dict__ for step in result.steps],
+                    "messages": result.messages,
+                }
+            )
+        if isinstance(result, AgentRunResult):
+            return json.dumps(
+                {
+                    "content": result.output,
+                    "steps": [step.__dict__ for step in result.steps],
+                }
+            )
+        if isinstance(result, str):
+            return result
+        if isinstance(result, dict):
+            normalized = dict(result)
+            if "output" in normalized and "content" not in normalized:
+                normalized["content"] = normalized.pop("output")
+            steps = normalized.get("steps")
+            if steps is not None:
+                normalized["steps"] = [
+                    step.__dict__ if isinstance(step, ExecutionStep) else step for step in steps
+                ]
+            return json.dumps(normalized)
+        return json.dumps(result)
+
+
 class _PythonToolHandler(EnkiToolHandler):
     def __init__(self, tools: dict[str, Tool]) -> None:
         self._tools = tools
@@ -500,6 +585,10 @@ class _PythonToolHandler(EnkiToolHandler):
     def clear_deps(self) -> None:
         with self._deps_lock:
             self._current_deps = None
+
+    def get_deps(self) -> Any:
+        with self._deps_lock:
+            return self._current_deps
 
     def execute(
             self,
@@ -742,6 +831,7 @@ class Agent(Generic[DepsT]):
             deps_type: type[DepsT] | None = None,
             instructions: str = "",
             agentic_loop: str | None = None,
+            agent_loop_handler: Callable[[AgentLoopRequest[DepsT]], Any] | None = None,
             name: str = "Agent",
             max_iterations: int = 20,
             workspace_home: str | None = None,
@@ -753,6 +843,7 @@ class Agent(Generic[DepsT]):
         self.deps_type = deps_type
         self.instructions = instructions
         self.agentic_loop = agentic_loop
+        self.agent_loop_handler = agent_loop_handler
         self.name = name
         self.max_iterations = max_iterations
         self.workspace_home = workspace_home
@@ -762,6 +853,7 @@ class Agent(Generic[DepsT]):
         self._memory_handler = _PythonMemoryHandler(self._memories)
         provider = llm if llm is not None else LiteLlmProvider()
         self._llm_handler = _PythonLlmHandler(provider)
+        self._loop_handler: _PythonAgentLoopHandler | None = None
         self._backend: Any = None
         self._dirty = True
         if tools:
@@ -792,6 +884,23 @@ class Agent(Generic[DepsT]):
         self._memories[memory.name] = memory
         self._dirty = True
         return memory
+
+    def set_agent_loop_handler(
+            self,
+            handler: Callable[[AgentLoopRequest[DepsT]], Any] | None,
+    ) -> None:
+        self.agent_loop_handler = handler
+        if self._backend is not None:
+            if handler is None:
+                if hasattr(self._backend, "clear_agent_loop_handler"):
+                    self._backend.clear_agent_loop_handler()
+                self._loop_handler = None
+            elif hasattr(self._backend, "set_agent_loop_handler"):
+                self._loop_handler = _PythonAgentLoopHandler(self._handler, handler)
+                self._backend.set_agent_loop_handler(self._loop_handler)
+
+    def clear_agent_loop_handler(self) -> None:
+        self.set_agent_loop_handler(None)
 
     def as_workflow_agent(
             self,
@@ -910,6 +1019,11 @@ class Agent(Generic[DepsT]):
                 max_iterations=self.max_iterations,
                 workspace_home=self.workspace_home,
             )
+        if self.agent_loop_handler is not None and hasattr(self._backend, "set_agent_loop_handler"):
+            self._loop_handler = _PythonAgentLoopHandler(self._handler, self.agent_loop_handler)
+            self._backend.set_agent_loop_handler(self._loop_handler)
+        else:
+            self._loop_handler = None
         self._dirty = False
         return self._backend
 

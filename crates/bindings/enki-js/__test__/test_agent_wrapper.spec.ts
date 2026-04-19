@@ -40,3 +40,40 @@ test.serial('test_agent_wrapper: run starts an async native task', (t) => {
 
   t.is(typeof result.then, 'function')
 })
+
+test.serial('test_agent_wrapper: custom loop handler overrides default loop', async (t) => {
+  const agent = new NativeEnkiAgent(
+    'Agent',
+    'Answer clearly and keep responses short.',
+    'ollama::llama3.2:latest',
+    20,
+    null,
+  )
+
+  agent.setAgentLoopHandler((requestJson) => {
+    const request = JSON.parse(requestJson)
+    return JSON.stringify({
+      content: `custom:${request.user_message}`,
+      steps: [
+        {
+          index: 1,
+          phase: 'Custom',
+          kind: 'final',
+          detail: 'Handled in JavaScript loop',
+        },
+      ],
+    })
+  })
+
+  const result = await agent.runWithTrace('session-2', 'Explain the override')
+
+  t.is(result.output, 'custom:Explain the override')
+  t.deepEqual(result.steps, [
+    {
+      index: 1,
+      phase: 'Custom',
+      kind: 'final',
+      detail: 'Handled in JavaScript loop',
+    },
+  ])
+})
