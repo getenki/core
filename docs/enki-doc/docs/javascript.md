@@ -30,6 +30,11 @@ This package is the current JavaScript surface. We are not publishing a WASM bin
 - `NativeEnkiAgent.withMemory(...)`
 - `NativeEnkiAgent.withToolsAndMemory(...)`
 
+It also supports two loop customization levels:
+
+- `agenticLoop` constructor arguments for prompt-level loop customization
+- `setAgentLoopHandler(...)` for a JavaScript-defined loop override
+
 For traced runs, the package also exposes:
 
 - `agent.runWithTrace(sessionId, userMessage)`
@@ -95,8 +100,66 @@ Constructor arguments:
 - `model?: string`
 - `maxIterations?: number`
 - `workspaceHome?: string`
+- `agenticLoop?: string`
 
 If omitted, the runtime falls back to built-in defaults for name, prompt, and max iterations.
+
+## Custom loops
+
+Use the optional `agenticLoop` argument when you want to replace the default loop instructions seen by the model but still keep the normal Rust runtime loop:
+
+```js
+const { NativeEnkiAgent } = require('@getenki/ai')
+
+const agent = new NativeEnkiAgent(
+  'Assistant',
+  'Answer clearly and keep responses short.',
+  'ollama::qwen3.5:latest',
+  20,
+  process.cwd(),
+  [
+    '1. Understand the request.',
+    '2. Decide whether a tool is needed.',
+    '3. Summarize observations.',
+    '4. Return the final answer.',
+  ].join('\n'),
+)
+```
+
+Use `setAgentLoopHandler(...)` when you want JavaScript to own the loop itself:
+
+```js
+const { NativeEnkiAgent } = require('@getenki/ai')
+
+const agent = new NativeEnkiAgent(
+  'Assistant',
+  'Answer clearly and keep responses short.',
+  'ollama::qwen3.5:latest',
+  8,
+  process.cwd(),
+)
+
+agent.setAgentLoopHandler((requestJson) => {
+  const request = JSON.parse(requestJson)
+  return JSON.stringify({
+    content: `Handled in JavaScript for: ${request.user_message}`,
+    steps: [
+      {
+        index: 1,
+        phase: 'Custom',
+        kind: 'final',
+        detail: 'Returned a final answer from JavaScript',
+      },
+    ],
+  })
+})
+```
+
+The handler receives a JSON request containing the current transcript, system prompt, tool catalog, model, iteration limit, and workspace paths.
+
+Use `clearAgentLoopHandler()` to restore the default runtime loop.
+
+Current note: the JavaScript loop handler is synchronous, so if your custom loop needs LLM access, prefer a synchronous API call pattern.
 
 ## Tools
 

@@ -10,6 +10,8 @@ Use `Agent` when you want the normal Python entry point.
 The wrapper exposes:
 
 - `Agent`
+- `AgentLoopRequest`
+- `AgentLoopResult`
 - `AgentRunResult`
 - `ExecutionStep`
 - `MemoryBackend`
@@ -39,6 +41,8 @@ Common constructor parameters:
 - `model`: model identifier passed through to the backend
 - `deps_type`: optional dependency type for tools that receive context
 - `instructions`: system prompt preamble
+- `agentic_loop`: prompt-level loop instructions embedded into the system prompt
+- `agent_loop_handler`: Python callback that overrides the default runtime loop
 - `name`: agent name
 - `max_iterations`: backend iteration limit
 - `workspace_home`: optional workspace root path
@@ -83,6 +87,77 @@ def get_player_name(ctx: RunContext[str]) -> str:
     """Get the player's name."""
     return ctx.deps
 ```
+
+## Customize the loop
+
+There are two different customization levels.
+
+### Prompt-level customization
+
+Use `agentic_loop=` when you want to keep the normal Rust runtime loop but replace the default loop instructions that the model sees:
+
+```python
+from enki_py import Agent
+
+agent = Agent(
+    "ollama::qwen3.5:latest",
+    instructions="Answer clearly and keep responses short.",
+    agentic_loop=(
+        "1. Understand the request.\n"
+        "2. Decide whether a tool is needed.\n"
+        "3. Summarize observations.\n"
+        "4. Return the final answer."
+    ),
+)
+```
+
+### Python-defined loop override
+
+Use `agent_loop_handler=` when you want Python to own the turn-by-turn control flow:
+
+```python
+from enki_py import Agent, AgentLoopRequest, AgentLoopResult, ExecutionStep
+
+
+def custom_loop(request: AgentLoopRequest[None]) -> AgentLoopResult:
+    return AgentLoopResult(
+        output=f"Handled in Python for: {request.user_message}",
+        steps=[
+            ExecutionStep(
+                index=1,
+                phase="Custom",
+                kind="final",
+                detail="Returned a final answer from Python",
+            )
+        ],
+    )
+
+
+agent = Agent(
+    "ollama::qwen3.5:latest",
+    instructions="Answer clearly and keep responses short.",
+    agent_loop_handler=custom_loop,
+)
+```
+
+The loop request includes:
+
+- `session_id`
+- `user_message`
+- `system_prompt`
+- `messages`
+- `tools`
+- `agent_dir`
+- `workspace_dir`
+- `sessions_dir`
+- `model`
+- `max_iterations`
+- `deps`
+
+You can also update the loop handler after construction with:
+
+- `agent.set_agent_loop_handler(handler)`
+- `agent.clear_agent_loop_handler()`
 
 ## Running the agent
 
