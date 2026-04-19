@@ -93,6 +93,9 @@ The repository currently includes these runnable examples:
 ### Python
 
 - `example/enki-py/simple_agent.py`: minimal high-level `Agent` usage with `run_sync()`
+- `example/enki-py/custom_agentic_loop.py`: Python-defined loop override that returns steps and a final answer
+- `example/enki-py/react_custom_agentic_loop.py`: Python ReAct loop example that calls an LLM and local tools turn by turn
+- `example/enki-py/compare_agent_loops.py`: runs the same question through default, prompt-customized, planner, and ReAct loops
 - `example/enki-py/simple_multi_agent.py`: coordinator plus researcher setup with `MultiAgentRuntime`
 - `example/enki-py/multi_agent_with_memory_and_tools.py`: shared memory backend, decorator tools, and delegated multi-agent execution
 - `example/enki-py/agent_workflow.py`: workflow runtime example using `Agent(...).as_workflow_agent(...)`
@@ -105,6 +108,8 @@ The repository currently includes these runnable examples:
 - `example/basic-ts/agent-workflow.ts`: TypeScript workflow runtime example using `NativeEnkiAgent` and `NativeWorkflowRuntime`
 - `example/basic-ts/human-intervention-workflow.ts`: interactive TypeScript workflow example showing `human_gate` pauses and failure escalation interventions
 - `example/basic-js/index.js`: basic JavaScript multi-agent runtime example
+- `example/basic-js/custom-agent-loop.js`: JavaScript-defined loop override returning custom steps and a final answer
+- `example/basic-js/react-custom-agent-loop.js`: JavaScript ReAct loop example that calls an LLM and local tools turn by turn
 - `example/basic-js/multi-agent-tools-memory.js`: JavaScript example with researcher/coordinator agents, tool calling, and shared memory
 
 For workflow-specific docs, see:

@@ -24,6 +24,8 @@ It exposes two layers:
 - A generated low-level API built around `EnkiAgent`, `EnkiTool`, and `EnkiToolHandler`
 - A higher-level Python wrapper in `enki_py.agent` that adds decorator-based tools, custom memory backends, dependency injection, sync helpers, step tracing, Python-side LLM adapters, and Python-native multi-agent orchestration
 
+The high-level wrapper also supports both prompt-level loop customization and Python-defined loop overrides.
+
 ## What to use
 
 Use the high-level `Agent` wrapper when you want Python ergonomics.
@@ -105,6 +107,54 @@ agent = Agent(
     llm=LiteLlmProvider(),
 )
 ```
+
+## Custom loops
+
+Use `agentic_loop=` when you want to change the loop instructions seen by the model while keeping the normal Rust runtime loop:
+
+```python
+from enki_py import Agent
+
+agent = Agent(
+    "ollama::qwen3.5:latest",
+    instructions="Answer clearly and keep responses short.",
+    agentic_loop=(
+        "1. Understand the request.\n"
+        "2. Decide whether a tool is needed.\n"
+        "3. Summarize observations.\n"
+        "4. Return the final answer."
+    ),
+)
+```
+
+Use `agent_loop_handler=` when you want Python to drive the actual turn-by-turn loop:
+
+```python
+from enki_py import Agent, AgentLoopRequest, AgentLoopResult, ExecutionStep
+
+
+def custom_loop(request: AgentLoopRequest[None]) -> AgentLoopResult:
+    return AgentLoopResult(
+        output=f"Handled in Python for: {request.user_message}",
+        steps=[
+            ExecutionStep(
+                index=1,
+                phase="Custom",
+                kind="final",
+                detail="Returned a final answer from Python",
+            )
+        ],
+    )
+
+
+agent = Agent(
+    "ollama::qwen3.5:latest",
+    instructions="Answer clearly and keep responses short.",
+    agent_loop_handler=custom_loop,
+)
+```
+
+This is the path to use for planner-executor loops, ReAct loops, or side-by-side loop comparisons.
 
 ## Low-Level API
 

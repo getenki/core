@@ -45,9 +45,16 @@ The loop converts each model response into a directive:
 
 This is what lets Enki enforce retry budgets, bound iterations, and emit consistent step traces.
 
-## Custom loop instructions
+## Custom loop options
 
-The runtime also allows the default loop prompt to be overridden per agent without changing the Rust state machine itself. Enki parses a tagged block from the agent's instruction preamble:
+Enki now supports two levels of loop customization:
+
+- prompt-level customization, which changes how the model interprets the loop while keeping the Rust state machine in control
+- host-language loop overrides, which let Python or JavaScript provide the loop implementation while Rust still owns session state, persistence, and step reporting
+
+### Prompt-level loop customization
+
+The runtime allows the default loop prompt to be overridden per agent without changing the Rust state machine itself. Enki parses a tagged block from the agent's instruction preamble:
 
 ```text
 Keep responses concise.
@@ -64,6 +71,23 @@ At runtime:
 - if the block is missing, empty, or malformed, Enki falls back to the default loop prompt
 
 This gives SDK users a controlled way to tune how the model interprets the loop while still keeping iteration limits, phase transitions, retries, and tool execution inside the Rust runtime.
+
+### Host-language loop overrides
+
+Python and JavaScript can also override the default loop with a callback-backed custom loop.
+
+In this mode:
+
+- Rust still initializes the run, loads prior messages, and provides the tool catalog and workspace context
+- the SDK callback receives a serialized request containing the current transcript, tool definitions, system prompt, and runtime paths
+- the callback returns a final answer, execution steps, and optionally an updated transcript
+- Rust persists the returned transcript and final output back into the normal Enki session state
+
+This makes patterns such as planner-executor loops, ReAct loops, or comparison harnesses possible without reimplementing the whole runtime.
+
+Use prompt-level customization when you only want to influence the model's behavior.
+
+Use a host-language loop override when you want Python or JavaScript to decide the turn-by-turn control flow itself.
 
 ## Runtime primitives
 
@@ -96,6 +120,8 @@ Python and JavaScript do not run the async engine directly on the host thread. E
 - exchange requests and callbacks over message channels
 
 When a tool or memory backend is defined in Python or JavaScript, the Rust runtime pauses, crosses the FFI boundary, waits for the callback result, and then resumes the same core loop. This keeps the host SDK ergonomic without duplicating runtime logic.
+
+The same callback bridge now powers custom loop handlers. The difference is that a custom loop callback can take over the whole turn sequence instead of only individual tool or memory callbacks.
 
 ## Observability
 
@@ -195,6 +221,73 @@ def lookup_note(topic: str) -> str:
 
 
 print(agent.run_sync("Summarize Tokio for a backend engineer.").output)
+```
+
+### Python ReAct loop override
+
+This pattern fits cases where you want Python to drive the actual thought/action/observation cycle.
+
+```python
+from enki_py import Agent, AgentLoopRequest, AgentLoopResult, ExecutionStep
+
+
+def react_loop(request: AgentLoopRequest[None]) -> AgentLoopResult:
+    return AgentLoopResult(
+        output="A Python-defined loop can call an LLM, choose tools, and return the final answer.",
+        steps=[
+            ExecutionStep(
+                index=1,
+                phase="ReAct",
+                kind="thought",
+                detail="Inspect the request and decide what to do next.",
+            ),
+            ExecutionStep(
+                index=2,
+                phase="ReAct",
+                kind="final",
+                detail="Return the answer from Python.",
+            ),
+        ],
+    )
+
+
+agent = Agent(
+    "openai::gpt-4o",
+    name="Python ReAct Agent",
+    instructions="Use tools when useful.",
+    agent_loop_handler=react_loop,
+)
+```
+
+### JavaScript loop override
+
+JavaScript can install a loop handler directly on `NativeEnkiAgent`:
+
+```js
+const { NativeEnkiAgent } = require('@getenki/ai')
+
+const agent = new NativeEnkiAgent(
+  'Loop Agent',
+  'Answer clearly.',
+  'ollama::qwen3.5:latest',
+  8,
+  process.cwd(),
+)
+
+agent.setAgentLoopHandler((requestJson) => {
+  const request = JSON.parse(requestJson)
+  return JSON.stringify({
+    content: `Handled in JavaScript for: ${request.user_message}`,
+    steps: [
+      {
+        index: 1,
+        phase: 'Custom',
+        kind: 'final',
+        detail: 'Returned a final answer from JavaScript',
+      },
+    ],
+  })
+})
 ```
 
 ### File-oriented workspace agent
