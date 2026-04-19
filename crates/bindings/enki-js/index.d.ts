@@ -8,6 +8,8 @@ export declare class NativeEnkiAgent {
   run(sessionId: string, userMessage: string): Promise<string>
   runWithTrace(sessionId: string, userMessage: string): Promise<JsAgentRunResult>
   configureWorkflow(agentId: string, capabilities: Array<string>): void
+  setAgentLoopHandler(handler: LoopCallback): void
+  clearAgentLoopHandler(): void
 }
 
 export declare class NativeMultiAgentRuntime {

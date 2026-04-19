@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use core_next::agent::{
     Agent, AgentDefinition, AgentExecutionContext, AgentRunResult as CoreAgentRunResult,
-    ExecutionStep as CoreExecutionStep,
+    CallbackAgentLoop, DefaultAgentLoop, ExecutionStep as CoreExecutionStep,
+    ExternalAgentLoopHandler,
 };
 use core_next::llm::{
     ChatMessage, LlmConfig, LlmProvider, LlmResponse, ResponseStream, ToolDefinition,
@@ -107,6 +108,10 @@ pub trait EnkiStepHandler: Send + Sync {
     fn on_step(&self, step: EnkiExecutionStep);
 }
 
+pub trait EnkiAgentLoopHandler: Send + Sync {
+    fn run(&self, request_json: String) -> String;
+}
+
 struct PythonTool {
     name: String,
     description: String,
@@ -126,6 +131,10 @@ struct PythonMemoryRouter {
 struct PythonLlmProvider {
     model: String,
     handler: Arc<dyn EnkiLlmHandler>,
+}
+
+struct PythonAgentLoop {
+    handler: Arc<dyn EnkiAgentLoopHandler>,
 }
 
 #[async_trait(?Send)]
@@ -357,6 +366,23 @@ struct RunRequest {
     reply_tx: tokio::sync::oneshot::Sender<CoreAgentRunResult>,
 }
 
+impl ExternalAgentLoopHandler for PythonAgentLoop {
+    fn run(&self, request_json: String) -> String {
+        self.handler.run(request_json)
+    }
+}
+
+enum AgentWorkerMessage {
+    Run(RunRequest),
+    SetLoopHandler {
+        handler: Arc<dyn EnkiAgentLoopHandler>,
+        reply_tx: mpsc::Sender<Result<(), String>>,
+    },
+    ClearLoopHandler {
+        reply_tx: mpsc::Sender<Result<(), String>>,
+    },
+}
+
 #[derive(Clone, Debug)]
 struct WorkflowRegistration {
     agent_id: String,
@@ -397,7 +423,7 @@ enum WorkflowRequestMessage {
 
 pub struct EnkiAgent {
     workflow_registration: Mutex<WorkflowRegistration>,
-    request_tx: Mutex<mpsc::Sender<RunRequest>>,
+    request_tx: Mutex<mpsc::Sender<AgentWorkerMessage>>,
 }
 
 pub struct EnkiWorkflowRuntime {
@@ -698,13 +724,54 @@ impl EnkiAgent {
         }
     }
 
+    pub fn set_agent_loop_handler(&self, handler: Box<dyn EnkiAgentLoopHandler>) {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let request = AgentWorkerMessage::SetLoopHandler {
+            handler: Arc::from(handler),
+            reply_tx,
+        };
+
+        let send_result = self
+            .request_tx
+            .lock()
+            .map_err(|_| "Worker error: request mutex poisoned".to_string())
+            .and_then(|sender| {
+                sender
+                    .send(request)
+                    .map_err(|_| "Worker error: agent worker has stopped".to_string())
+            });
+
+        if send_result.is_ok() {
+            let _ = reply_rx.recv();
+        }
+    }
+
+    pub fn clear_agent_loop_handler(&self) {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let request = AgentWorkerMessage::ClearLoopHandler { reply_tx };
+
+        let send_result = self
+            .request_tx
+            .lock()
+            .map_err(|_| "Worker error: request mutex poisoned".to_string())
+            .and_then(|sender| {
+                sender
+                    .send(request)
+                    .map_err(|_| "Worker error: agent worker has stopped".to_string())
+            });
+
+        if send_result.is_ok() {
+            let _ = reply_rx.recv();
+        }
+    }
+
     fn from_registry(definition: AgentDefinition, workspace_home: Option<String>) -> Self {
         let workflow_registration = WorkflowRegistration {
             agent_id: definition.name.clone(),
             capabilities: Vec::new(),
         };
         let workspace_home = workspace_home.map(PathBuf::from);
-        let (request_tx, request_rx) = mpsc::channel::<RunRequest>();
+        let (request_tx, request_rx) = mpsc::channel::<AgentWorkerMessage>();
 
         thread::spawn(move || {
             let runtime = match tokio::runtime::Builder::new_current_thread()
@@ -715,14 +782,22 @@ impl EnkiAgent {
                 Err(error) => {
                     let message =
                         format!("Initialization error: failed to create tokio runtime: {error}");
-                    for request in request_rx {
-                        let _ = request.reply_tx.send(error_run_result(message.clone()));
+                    for message_request in request_rx {
+                        match message_request {
+                            AgentWorkerMessage::Run(request) => {
+                                let _ = request.reply_tx.send(error_run_result(message.clone()));
+                            }
+                            AgentWorkerMessage::SetLoopHandler { reply_tx, .. }
+                            | AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
+                                let _ = reply_tx.send(Err(message.clone()));
+                            }
+                        }
                     }
                     return;
                 }
             };
 
-            let agent =
+            let mut agent =
                 match runtime.block_on(Agent::with_definition_tool_registry_executor_and_workspace(
                     definition,
                     ToolRegistry::new(),
@@ -732,21 +807,43 @@ impl EnkiAgent {
                     Ok(agent) => agent,
                     Err(error) => {
                         let message = format!("Initialization error: {error}");
-                        for request in request_rx {
-                            let _ = request.reply_tx.send(error_run_result(message.clone()));
+                        for message_request in request_rx {
+                            match message_request {
+                                AgentWorkerMessage::Run(request) => {
+                                    let _ = request.reply_tx.send(error_run_result(message.clone()));
+                                }
+                                AgentWorkerMessage::SetLoopHandler { reply_tx, .. }
+                                | AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
+                                    let _ = reply_tx.send(Err(message.clone()));
+                                }
+                            }
                         }
                         return;
                     }
                 };
 
-            for request in request_rx {
-                let response = runtime.block_on(agent.run_detailed_with_context(
-                    &request.session_id,
-                    &request.user_message,
-                    request.exec_ctx,
-                    request.on_step,
-                ));
-                let _ = request.reply_tx.send(response);
+            for message_request in request_rx {
+                match message_request {
+                    AgentWorkerMessage::Run(request) => {
+                        let response = runtime.block_on(agent.run_detailed_with_context(
+                            &request.session_id,
+                            &request.user_message,
+                            request.exec_ctx,
+                            request.on_step,
+                        ));
+                        let _ = request.reply_tx.send(response);
+                    }
+                    AgentWorkerMessage::SetLoopHandler { handler, reply_tx } => {
+                        agent.agent_loop = Box::new(CallbackAgentLoop::new(Arc::new(
+                            PythonAgentLoop { handler },
+                        )));
+                        let _ = reply_tx.send(Ok(()));
+                    }
+                    AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
+                        agent.agent_loop = Box::new(DefaultAgentLoop);
+                        let _ = reply_tx.send(Ok(()));
+                    }
+                }
             }
         });
 
@@ -805,7 +902,7 @@ impl EnkiAgent {
             capabilities: Vec::new(),
         };
         let workspace_home = workspace_home.map(PathBuf::from);
-        let (request_tx, request_rx) = mpsc::channel::<RunRequest>();
+        let (request_tx, request_rx) = mpsc::channel::<AgentWorkerMessage>();
 
         thread::spawn(move || {
             let runtime = match tokio::runtime::Builder::new_current_thread()
@@ -816,8 +913,16 @@ impl EnkiAgent {
                 Err(error) => {
                     let message =
                         format!("Initialization error: failed to create tokio runtime: {error}");
-                    for request in request_rx {
-                        let _ = request.reply_tx.send(error_run_result(message.clone()));
+                    for message_request in request_rx {
+                        match message_request {
+                            AgentWorkerMessage::Run(request) => {
+                                let _ = request.reply_tx.send(error_run_result(message.clone()));
+                            }
+                            AgentWorkerMessage::SetLoopHandler { reply_tx, .. }
+                            | AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
+                                let _ = reply_tx.send(Err(message.clone()));
+                            }
+                        }
                     }
                     return;
                 }
@@ -828,8 +933,16 @@ impl EnkiAgent {
                     Ok(tool_registry) => tool_registry,
                     Err(error) => {
                         let message = format!("Initialization error: {error}");
-                        for request in request_rx {
-                            let _ = request.reply_tx.send(error_run_result(message.clone()));
+                        for message_request in request_rx {
+                            match message_request {
+                                AgentWorkerMessage::Run(request) => {
+                                    let _ = request.reply_tx.send(error_run_result(message.clone()));
+                                }
+                                AgentWorkerMessage::SetLoopHandler { reply_tx, .. }
+                                | AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
+                                    let _ = reply_tx.send(Err(message.clone()));
+                                }
+                            }
                         }
                         return;
                     }
@@ -846,7 +959,7 @@ impl EnkiAgent {
                 }) as Box<dyn LlmProvider>
             });
 
-            let agent = match runtime.block_on(
+            let mut agent = match runtime.block_on(
                 Agent::with_definition_tool_registry_executor_llm_and_workspace(
                     definition,
                     tool_registry,
@@ -859,21 +972,43 @@ impl EnkiAgent {
                 Ok(agent) => agent,
                 Err(error) => {
                     let message = format!("Initialization error: {error}");
-                    for request in request_rx {
-                        let _ = request.reply_tx.send(error_run_result(message.clone()));
+                    for message_request in request_rx {
+                        match message_request {
+                            AgentWorkerMessage::Run(request) => {
+                                let _ = request.reply_tx.send(error_run_result(message.clone()));
+                            }
+                            AgentWorkerMessage::SetLoopHandler { reply_tx, .. }
+                            | AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
+                                let _ = reply_tx.send(Err(message.clone()));
+                            }
+                        }
                     }
                     return;
                 }
             };
 
-            for request in request_rx {
-                let response = runtime.block_on(agent.run_detailed_with_context(
-                    &request.session_id,
-                    &request.user_message,
-                    request.exec_ctx,
-                    request.on_step,
-                ));
-                let _ = request.reply_tx.send(response);
+            for message_request in request_rx {
+                match message_request {
+                    AgentWorkerMessage::Run(request) => {
+                        let response = runtime.block_on(agent.run_detailed_with_context(
+                            &request.session_id,
+                            &request.user_message,
+                            request.exec_ctx,
+                            request.on_step,
+                        ));
+                        let _ = request.reply_tx.send(response);
+                    }
+                    AgentWorkerMessage::SetLoopHandler { handler, reply_tx } => {
+                        agent.agent_loop = Box::new(CallbackAgentLoop::new(Arc::new(
+                            PythonAgentLoop { handler },
+                        )));
+                        let _ = reply_tx.send(Ok(()));
+                    }
+                    AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
+                        agent.agent_loop = Box::new(DefaultAgentLoop);
+                        let _ = reply_tx.send(Ok(()));
+                    }
+                }
             }
         });
 
@@ -947,13 +1082,13 @@ impl EnkiAgent {
         on_step: Option<std::sync::Arc<dyn Fn(CoreExecutionStep) + Send + Sync>>,
     ) -> CoreAgentRunResult {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        let request = RunRequest {
+        let request = AgentWorkerMessage::Run(RunRequest {
             session_id,
             user_message,
             exec_ctx,
             on_step,
             reply_tx,
-        };
+        });
 
         let send_result = self
             .request_tx

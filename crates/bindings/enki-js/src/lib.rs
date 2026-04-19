@@ -3,7 +3,8 @@
 use async_trait::async_trait;
 use core_next::agent::{
   Agent as CoreAgent, AgentDefinition, AgentExecutionContext, AgentRunResult as CoreAgentRunResult,
-  ExecutionStep as CoreExecutionStep,
+  CallbackAgentLoop, DefaultAgentLoop, ExecutionStep as CoreExecutionStep,
+  ExternalAgentLoopHandler,
 };
 use core_next::memory::{
   MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
@@ -76,12 +77,25 @@ type RecordCallback<'scope> = Function<'scope, FnArgs<(String, String, String, S
 type RecallCallback<'scope> =
   Function<'scope, FnArgs<(String, String, String, u32)>, Vec<JsMemoryEntry>>;
 type SessionCallback<'scope> = Function<'scope, FnArgs<(String, String)>, ()>;
+type LoopHandler = ThreadsafeFunction<String, String, FnArgs<(String,)>, napi::Status, false>;
+type LoopCallback<'scope> = Function<'scope, FnArgs<(String,)>, String>;
 
 struct RunRequest {
   session_id: String,
   user_message: String,
   exec_ctx: AgentExecutionContext,
   reply_tx: mpsc::Sender<CoreAgentRunResult>,
+}
+
+enum AgentWorkerMessage {
+  Run(RunRequest),
+  SetLoopHandler {
+    handler: Arc<dyn ExternalAgentLoopHandler>,
+    reply_tx: mpsc::Sender<Result<(), String>>,
+  },
+  ClearLoopHandler {
+    reply_tx: mpsc::Sender<Result<(), String>>,
+  },
 }
 
 #[derive(Clone, Debug)]
@@ -92,7 +106,7 @@ struct WorkflowRegistration {
 
 struct AgentHandle {
   workflow_registration: Mutex<WorkflowRegistration>,
-  request_tx: Mutex<mpsc::Sender<RunRequest>>,
+  request_tx: Mutex<mpsc::Sender<AgentWorkerMessage>>,
 }
 
 struct MultiAgentHandle {
@@ -129,6 +143,10 @@ struct JsMemoryHandlers {
   recall: MemoryRecallHandler,
   flush: MemoryFlushHandler,
   consolidate: MemoryConsolidateHandler,
+}
+
+struct JsAgentLoopHandler {
+  handler: LoopHandler,
 }
 
 struct WorkerConfig {
@@ -443,6 +461,18 @@ impl MemoryRouter for JsMemoryRouter {
   }
 }
 
+impl ExternalAgentLoopHandler for JsAgentLoopHandler {
+  fn run(&self, request_json: String) -> String {
+    futures::executor::block_on(self.handler.call_async(request_json)).unwrap_or_else(|error| {
+      json!({
+        "content": format!("Custom agent loop error: {error}"),
+        "steps": [],
+      })
+      .to_string()
+    })
+  }
+}
+
 #[napi]
 impl NativeWorkflowRuntime {
   #[napi(constructor)]
@@ -679,6 +709,16 @@ impl NativeEnkiAgent {
   ) -> napi::Result<()> {
     self.inner.configure_workflow(agent_id, capabilities)
   }
+
+  #[napi(js_name = "setAgentLoopHandler")]
+  pub fn set_agent_loop_handler(&self, handler: LoopCallback<'_>) -> napi::Result<()> {
+    self.inner.set_agent_loop_handler(build_loop_handler(handler)?)
+  }
+
+  #[napi(js_name = "clearAgentLoopHandler")]
+  pub fn clear_agent_loop_handler(&self) -> napi::Result<()> {
+    self.inner.clear_agent_loop_handler()
+  }
 }
 
 #[napi]
@@ -840,6 +880,47 @@ impl AgentHandle {
     self.run_core(session_id, user_message, AgentExecutionContext::default())
   }
 
+  fn set_agent_loop_handler(&self, handler: LoopHandler) -> napi::Result<()> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = AgentWorkerMessage::SetLoopHandler {
+      handler: Arc::new(JsAgentLoopHandler { handler }),
+      reply_tx,
+    };
+
+    let sender = self
+      .request_tx
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Worker error: request mutex poisoned".to_string()))?;
+
+    sender.send(request).map_err(|_| {
+      napi::Error::from_reason("Worker error: agent worker has stopped".to_string())
+    })?;
+
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn clear_agent_loop_handler(&self) -> napi::Result<()> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = AgentWorkerMessage::ClearLoopHandler { reply_tx };
+
+    let sender = self
+      .request_tx
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Worker error: request mutex poisoned".to_string()))?;
+
+    sender.send(request).map_err(|_| {
+      napi::Error::from_reason("Worker error: agent worker has stopped".to_string())
+    })?;
+
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
   fn run_core(
     &self,
     session_id: String,
@@ -847,12 +928,12 @@ impl AgentHandle {
     exec_ctx: AgentExecutionContext,
   ) -> napi::Result<CoreAgentRunResult> {
     let (reply_tx, reply_rx) = mpsc::channel();
-    let request = RunRequest {
+    let request = AgentWorkerMessage::Run(RunRequest {
       session_id,
       user_message,
       exec_ctx,
       reply_tx,
-    };
+    });
 
     let sender = self
       .request_tx
@@ -1161,6 +1242,12 @@ fn build_memory_handlers(callbacks: JsMemoryCallbackSet<'_>) -> napi::Result<JsM
   })
 }
 
+fn build_loop_handler(loop_handler: LoopCallback<'_>) -> napi::Result<LoopHandler> {
+  loop_handler
+    .build_threadsafe_function()
+    .build_callback(|ctx: ThreadsafeCallContext<String>| Ok(FnArgs::from((ctx.value,))))
+}
+
 fn resolve_tool_definitions(
   tools: Vec<Object<'_>>,
   tool_handler: Option<SharedToolCallback<'_>>,
@@ -1314,9 +1401,9 @@ fn spawn_agent_worker(
   definition: AgentDefinition,
   workspace_home: Option<String>,
   worker_config: WorkerConfig,
-) -> napi::Result<mpsc::Sender<RunRequest>> {
+) -> napi::Result<mpsc::Sender<AgentWorkerMessage>> {
   let workspace_home = workspace_home.map(PathBuf::from);
-  let (request_tx, request_rx) = mpsc::channel::<RunRequest>();
+  let (request_tx, request_rx) = mpsc::channel::<AgentWorkerMessage>();
   let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
 
   thread::spawn(move || {
@@ -1329,10 +1416,12 @@ fn spawn_agent_worker(
         let _ = ready_tx.send(Err(format!(
           "Initialization error: failed to create tokio runtime: {error}"
         )));
-        for request in request_rx {
-          let _ = request.reply_tx.send(error_run_result(
-            "Initialization error: failed to create tokio runtime",
-          ));
+        for message_request in request_rx {
+          if let AgentWorkerMessage::Run(request) = message_request {
+            let _ = request.reply_tx.send(error_run_result(
+              "Initialization error: failed to create tokio runtime",
+            ));
+          }
         }
         return;
       }
@@ -1343,7 +1432,7 @@ fn spawn_agent_worker(
       .memory_handlers
       .map(|handlers| build_memory_manager(worker_config.memories, handlers));
 
-    let agent = match runtime.block_on(
+    let mut agent = match runtime.block_on(
       CoreAgent::with_definition_tool_registry_executor_llm_and_workspace(
         definition,
         tool_registry,
@@ -1357,8 +1446,10 @@ fn spawn_agent_worker(
       Err(error) => {
         let message = format!("Initialization error: {error}");
         let _ = ready_tx.send(Err(message.clone()));
-        for request in request_rx {
-          let _ = request.reply_tx.send(error_run_result(message.clone()));
+        for message_request in request_rx {
+          if let AgentWorkerMessage::Run(request) = message_request {
+            let _ = request.reply_tx.send(error_run_result(message.clone()));
+          }
         }
         return;
       }
@@ -1366,14 +1457,26 @@ fn spawn_agent_worker(
 
     let _ = ready_tx.send(Ok(()));
 
-    for request in request_rx {
-      let response = runtime.block_on(agent.run_detailed_with_context(
-        &request.session_id,
-        &request.user_message,
-        request.exec_ctx,
-        None,
-      ));
-      let _ = request.reply_tx.send(response);
+    for message_request in request_rx {
+      match message_request {
+        AgentWorkerMessage::Run(request) => {
+          let response = runtime.block_on(agent.run_detailed_with_context(
+            &request.session_id,
+            &request.user_message,
+            request.exec_ctx,
+            None,
+          ));
+          let _ = request.reply_tx.send(response);
+        }
+        AgentWorkerMessage::SetLoopHandler { handler, reply_tx } => {
+          agent.agent_loop = Box::new(CallbackAgentLoop::new(handler));
+          let _ = reply_tx.send(Ok(()));
+        }
+        AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
+          agent.agent_loop = Box::new(DefaultAgentLoop);
+          let _ = reply_tx.send(Ok(()));
+        }
+      }
     }
   });
 

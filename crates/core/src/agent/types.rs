@@ -1,4 +1,5 @@
 use crate::tooling::types::WorkflowToolContext;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -29,7 +30,7 @@ pub struct AgentExecutionContext {
     pub workflow: Option<WorkflowToolContext>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionStep {
     pub index: usize,
     pub phase: String,

@@ -428,6 +428,7 @@ version = "0.5.31"
 dependencies = [
  "async-trait",
  "core",
+ "futures",
  "napi",
  "napi-build",
  "napi-derive",
