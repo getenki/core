@@ -12,14 +12,14 @@ After publishing, add it to your Rust project with a rename so the import path s
 
 ```toml
 [dependencies]
-enki_next = { package = "enki-next", version = "0.5.75" }
+enki_next = { package = "enki-next", version = "0.5.76" }
 ```
 
 If you want the bundled universal LLM provider used by the local CLI and examples, enable the feature explicitly:
 
 ```toml
 [dependencies]
-enki_next = { package = "enki-next", version = "0.5.75", features = ["universal-llm-provider"] }
+enki_next = { package = "enki-next", version = "0.5.76", features = ["universal-llm-provider"] }
 ```
 
 ## Choose the right Rust entry point
