@@ -3,9 +3,9 @@ use crate::cli::{
     WorkflowRunArgs,
 };
 use crate::manifest::Manifest;
-use core_next::agent::AgentDefinition;
-use core_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
-use core_next::workflow::{
+use enki_next::agent::AgentDefinition;
+use enki_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
+use enki_next::workflow::{
     WorkflowEvent, WorkflowEventListener, WorkflowRequest, WorkflowResponse, WorkflowRuntime,
     WorkflowRuntimeBuilder, WorkflowStatus, WorkflowTaskRunner,
 };

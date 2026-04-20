@@ -7,12 +7,12 @@ license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/getenki/core"
 homepage = "https://docs.getenki.com"
-documentation = "https://docs.rs/core"
+documentation = "https://docs.rs/enki-next"
 keywords = ["agent", "workflow", "llm", "runtime", "enki"]
 categories = ["asynchronous", "command-line-interface", "development-tools"]
 
 [lib]
-name = "core_next"
+name = "enki_next"
 
 [features]
 default = []

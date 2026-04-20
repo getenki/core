@@ -1,8 +1,8 @@
 use crate::cli::TestArgs;
 use crate::manifest::Manifest;
 use crate::project_runtime;
-use core_next::agent::AgentDefinition;
-use core_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
+use enki_next::agent::AgentDefinition;
+use enki_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
 
 pub async fn run(args: TestArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;

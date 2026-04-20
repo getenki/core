@@ -1,4 +1,4 @@
-use core_next::workflow::{
+use enki_next::workflow::{
     RetryPolicy, TaskDefinition, TaskTarget, WorkflowDefinition, WorkflowEdgeDefinition,
     WorkflowEdgeTransition, WorkflowFailurePolicy, WorkflowNodeDefinition, WorkflowNodeKind,
 };

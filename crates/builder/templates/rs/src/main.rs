@@ -3,8 +3,8 @@
 //! Run with:   cargo run
 //! Or via CLI: enki run --message "Hello!"
 
-use core_next::llm::UniversalLLMClient;
-use core_next::runtime::RuntimeBuilder;
+use enki_next::llm::UniversalLLMClient;
+use enki_next::runtime::RuntimeBuilder;
 use std::env;
 
 #[tokio::main]
@@ -30,7 +30,7 @@ async fn main() {
     println!("> {message}");
     println!();
 
-    let request = core_next::runtime::RuntimeRequest::new("session-1", "cli", &message);
+    let request = enki_next::runtime::RuntimeRequest::new("session-1", "cli", &message);
     match runtime.process(request).await {
         Ok(response) => println!("{}", response.content),
         Err(e) => eprintln!("Error: {e}"),

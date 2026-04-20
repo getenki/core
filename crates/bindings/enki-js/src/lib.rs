@@ -1,20 +1,20 @@
 #![deny(clippy::all)]
 
 use async_trait::async_trait;
-use core_next::agent::{
+use enki_next::agent::{
   Agent as CoreAgent, AgentDefinition, AgentExecutionContext, AgentRunResult as CoreAgentRunResult,
   CallbackAgentLoop, DefaultAgentLoop, ExecutionStep as CoreExecutionStep,
   ExternalAgentLoopHandler,
 };
-use core_next::memory::{
+use enki_next::memory::{
   MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
 };
-use core_next::registry::{AgentCard, AgentStatus, DiscoverQuery};
-use core_next::runtime::MultiAgentRuntime;
-use core_next::tooling::tool_calling::RegistryToolExecutor;
-use core_next::tooling::types::{Tool, ToolContext, ToolRegistry, WorkflowToolContext};
-use core_next::workflow::{TaskTarget, WorkflowTaskResult};
-use core_next::{
+use enki_next::registry::{AgentCard, AgentStatus, DiscoverQuery};
+use enki_next::runtime::MultiAgentRuntime;
+use enki_next::tooling::tool_calling::RegistryToolExecutor;
+use enki_next::tooling::types::{Tool, ToolContext, ToolRegistry, WorkflowToolContext};
+use enki_next::workflow::{TaskTarget, WorkflowTaskResult};
+use enki_next::{
   TaskDefinition, WorkflowDefinition, WorkflowRequest, WorkflowRuntime, WorkflowTaskRunner,
 };
 use napi::bindgen_prelude::{ClassInstance, FnArgs, Function, JsObjectValue, Object, Unknown};

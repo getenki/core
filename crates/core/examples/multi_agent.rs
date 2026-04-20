@@ -11,8 +11,8 @@
 //!   ENKI_MODEL      — model string (default: ollama::qwen3.5)
 //!   ENKI_WORKSPACE  — workspace root (default: crates/core/examples/.agent-workspace)
 
-use core_next::agent::AgentDefinition;
-use core_next::runtime::MultiAgentRuntime;
+use enki_next::agent::AgentDefinition;
+use enki_next::runtime::MultiAgentRuntime;
 use std::env;
 use std::io::{self, Write};
 use std::path::PathBuf;

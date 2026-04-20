@@ -1,4 +1,4 @@
-use core_next::agent::{Agent, AgentDefinition};
+use enki_next::agent::{Agent, AgentDefinition};
 use std::env;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -39,7 +39,7 @@ async fn main() {
 
     let agent = match Agent::with_definition_executor_and_workspace(
         definition,
-        Box::new(core_next::tooling::tool_calling::RegistryToolExecutor),
+        Box::new(enki_next::tooling::tool_calling::RegistryToolExecutor),
         workspace_home,
     )
     .await

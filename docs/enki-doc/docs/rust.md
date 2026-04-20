@@ -9,18 +9,18 @@ The Rust workspace contains Enki's core runtime and the language bindings built 
 
 ## Published library
 
-The publishable Rust crate is the `core` package, imported in Rust as `core_next`:
+The publishable Rust crate is the `enki-next` package, imported in Rust as `enki_next`:
 
 ```toml
 [dependencies]
-core_next = { package = "core", version = "0.5.61" }
+enki_next = { package = "enki-next", version = "0.5.61" }
 ```
 
 If you want the bundled universal LLM provider, enable the feature explicitly:
 
 ```toml
 [dependencies]
-core_next = { package = "core", version = "0.5.61", features = ["universal-llm-provider"] }
+enki_next = { package = "enki-next", version = "0.5.61", features = ["universal-llm-provider"] }
 ```
 
 ## Workspace layout

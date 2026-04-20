@@ -1,8 +1,8 @@
 use crate::cli::RunArgs;
 use crate::manifest::Manifest;
 use crate::project_runtime;
-use core_next::agent::AgentDefinition;
-use core_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
+use enki_next::agent::AgentDefinition;
+use enki_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
 
 pub async fn run(args: RunArgs) -> Result<(), String> {
     let manifest = Manifest::load(&args.manifest)?;
@@ -150,7 +150,7 @@ fn resolve_workspace_home(args: &RunArgs, manifest: &Manifest) -> String {
         .to_string()
 }
 
-fn print_execution_steps(steps: &[core_next::agent::ExecutionStep]) {
+fn print_execution_steps(steps: &[enki_next::agent::ExecutionStep]) {
     if steps.is_empty() {
         return;
     }

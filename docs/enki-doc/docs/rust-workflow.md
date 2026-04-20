@@ -7,7 +7,7 @@ slug: /rust-workflow
 
 Rust exposes the workflow engine directly when you want to build workflow definitions in code instead of driving them through `enki.toml`.
 
-Import the main types from `core_next`:
+Import the main types from `enki_next`:
 
 - `WorkflowRuntime`
 - `WorkflowRequest`
@@ -19,7 +19,7 @@ Import the main types from `core_next`:
 Typical setup:
 
 ```rust
-use core_next::{
+use enki_next::{
     TaskDefinition, WorkflowDefinition, WorkflowRequest, WorkflowRuntime, WorkflowTaskRunner,
 };
 use serde_json::json;

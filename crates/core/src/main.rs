@@ -1,6 +1,6 @@
 #[cfg(feature = "universal-llm-provider")]
-use core_next::llm::UniversalLLMClient;
-use core_next::runtime::{CliChannel, RuntimeBuilder};
+use enki_next::llm::UniversalLLMClient;
+use enki_next::runtime::{CliChannel, RuntimeBuilder};
 use std::env;
 
 #[cfg(feature = "universal-llm-provider")]

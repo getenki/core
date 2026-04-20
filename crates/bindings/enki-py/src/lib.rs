@@ -1,19 +1,19 @@
 use async_trait::async_trait;
-use core_next::agent::{
+use enki_next::agent::{
     Agent, AgentDefinition, AgentExecutionContext, AgentRunResult as CoreAgentRunResult,
     CallbackAgentLoop, DefaultAgentLoop, ExecutionStep as CoreExecutionStep,
     ExternalAgentLoopHandler,
 };
-use core_next::llm::{
+use enki_next::llm::{
     ChatMessage, LlmConfig, LlmProvider, LlmResponse, ResponseStream, ToolDefinition,
 };
-use core_next::memory::{
+use enki_next::memory::{
     MemoryEntry, MemoryKind, MemoryManager, MemoryProvider, MemoryRouter, MemoryStrategy,
 };
-use core_next::tooling::tool_calling::RegistryToolExecutor;
-use core_next::tooling::types::{Tool, ToolContext, ToolRegistry, WorkflowToolContext};
-use core_next::workflow::{TaskTarget, WorkflowTaskResult};
-use core_next::{
+use enki_next::tooling::tool_calling::RegistryToolExecutor;
+use enki_next::tooling::types::{Tool, ToolContext, ToolRegistry, WorkflowToolContext};
+use enki_next::workflow::{TaskTarget, WorkflowTaskResult};
+use enki_next::{
     TaskDefinition, WorkflowDefinition, WorkflowRequest, WorkflowRuntime, WorkflowTaskRunner,
 };
 use futures::stream;
@@ -285,7 +285,7 @@ impl LlmProvider for PythonLlmProvider {
         &self,
         messages: &[ChatMessage],
         _config: &LlmConfig,
-    ) -> core_next::llm::Result<LlmResponse> {
+    ) -> enki_next::llm::Result<LlmResponse> {
         self.complete_with_tools(messages, &[], &LlmConfig::default())
             .await
     }
@@ -294,7 +294,7 @@ impl LlmProvider for PythonLlmProvider {
         &self,
         _messages: &[ChatMessage],
         _config: &LlmConfig,
-    ) -> core_next::llm::Result<ResponseStream> {
+    ) -> enki_next::llm::Result<ResponseStream> {
         Ok(Box::pin(stream::empty()))
     }
 
@@ -303,12 +303,12 @@ impl LlmProvider for PythonLlmProvider {
         messages: &[ChatMessage],
         tools: &[ToolDefinition],
         _config: &LlmConfig,
-    ) -> core_next::llm::Result<LlmResponse> {
+    ) -> enki_next::llm::Result<LlmResponse> {
         let messages_json = serde_json::to_string(messages).map_err(|error| {
-            core_next::llm::LlmError::Provider(format!("Failed to serialize messages: {error}"))
+            enki_next::llm::LlmError::Provider(format!("Failed to serialize messages: {error}"))
         })?;
         let tools_json = serde_json::to_string(tools).map_err(|error| {
-            core_next::llm::LlmError::Provider(format!("Failed to serialize tools: {error}"))
+            enki_next::llm::LlmError::Provider(format!("Failed to serialize tools: {error}"))
         })?;
 
         let raw = self

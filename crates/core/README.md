@@ -1,8 +1,8 @@
-# Enki Core
+# Enki Next
 
-`core` is Enki's Rust runtime library. It provides the shared agent, workflow, memory, registry, tooling, and LLM provider abstractions used by the higher-level SDKs and local CLI entrypoints.
+`enki-next` is Enki's Rust runtime library. It provides the shared agent, workflow, memory, registry, tooling, and LLM provider abstractions used by the higher-level SDKs and local CLI entrypoints.
 
-The crate is published as package `core`, but the Rust import name is `core_next`.
+The crate is published as package `enki-next`, and the Rust import name is `enki_next`.
 
 ## Install
 
@@ -10,26 +10,26 @@ Add the crate to your Rust project with a rename so the import path stays explic
 
 ```toml
 [dependencies]
-core_next = { package = "core", version = "0.5.61" }
+enki_next = { package = "enki-next", version = "0.5.61" }
 ```
 
 If you want the bundled universal LLM provider used by the local CLI and examples, enable the feature explicitly:
 
 ```toml
 [dependencies]
-core_next = { package = "core", version = "0.5.61", features = ["universal-llm-provider"] }
+enki_next = { package = "enki-next", version = "0.5.61", features = ["universal-llm-provider"] }
 ```
 
 ## Main modules
 
-- `core_next::agent`
-- `core_next::llm`
-- `core_next::memory`
-- `core_next::message`
-- `core_next::registry`
-- `core_next::runtime`
-- `core_next::tooling`
-- `core_next::workflow`
+- `enki_next::agent`
+- `enki_next::llm`
+- `enki_next::memory`
+- `enki_next::message`
+- `enki_next::registry`
+- `enki_next::runtime`
+- `enki_next::tooling`
+- `enki_next::workflow`
 
 ## Top-level workflow exports
 
@@ -45,7 +45,7 @@ The crate root re-exports the most common workflow types:
 ## Example
 
 ```rust
-use core_next::{
+use enki_next::{
     TaskDefinition, WorkflowDefinition, WorkflowRequest, WorkflowRuntime, WorkflowTaskRunner,
 };
 ```

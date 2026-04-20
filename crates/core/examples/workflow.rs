@@ -8,8 +8,8 @@
 //! ```
 
 use async_trait::async_trait;
-use core_next::tooling::types::WorkflowToolContext;
-use core_next::workflow::{
+use enki_next::tooling::types::WorkflowToolContext;
+use enki_next::workflow::{
     TaskDefinition, TaskTarget, WorkflowDefinition, WorkflowEdgeDefinition, WorkflowEdgeTransition,
     WorkflowFailurePolicy, WorkflowNodeDefinition, WorkflowNodeKind, WorkflowRequest,
     WorkflowRuntime, WorkflowTaskResult, WorkflowTaskRunner,

@@ -2,8 +2,8 @@ use crate::cli::JoinArgs;
 use crate::interactive_cli::{ClientEvent, InteractiveCliClient};
 use crate::manifest::Manifest;
 use crate::project_runtime;
-use core_next::agent::AgentDefinition;
-use core_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
+use enki_next::agent::AgentDefinition;
+use enki_next::runtime::multi_agent::MultiAgentRuntimeBuilder;
 use std::io;
 
 pub async fn run(args: JoinArgs) -> Result<(), String> {
