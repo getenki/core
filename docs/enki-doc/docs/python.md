@@ -89,6 +89,29 @@ print(result.output)
 
 The step stream mirrors the Rust runtime's execution phases and is the easiest way to inspect tool calls and loop progress from Python.
 
+## Reusable tool registries
+
+The high-level wrapper also exposes `ToolRegistry` so you can manage tools separately from a single agent instance.
+
+```python
+from enki_py import Agent, ToolRegistry
+
+registry = ToolRegistry()
+
+@registry.tool_plain
+def lookup_release_note(feature: str) -> str:
+    return f"release-note:{feature}"
+
+agent = Agent(
+    "ollama::qwen3.5:latest",
+    instructions="Use connected tools when they help.",
+)
+
+agent.connect_tool_registry(registry)
+```
+
+You can also pass `tool_registry=registry` when constructing `Agent(...)`.
+
 ## Python-side LLM providers
 
 The high-level `Agent` accepts `llm=` for a custom provider backend or callback.

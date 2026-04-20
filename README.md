@@ -42,11 +42,12 @@ The workspace currently contains:
 - A stateful agent runtime with persistent sessions and workspace-backed execution
 - A workflow runtime with DAG execution, persisted run state, resume support, and intervention handling
 - Built-in tools for `read_file`, `write_file`, and `exec`
+- Reusable tool registries that can be prepared once and connected to agents dynamically
 - Human-in-the-loop runtime support through the intrinsic `ask_human` tool
 - Execution tracing through per-step `ExecutionStep` events
 - Multi-provider LLM support via the `provider::model` format
-- Python bindings exposing low-level FFI types plus the high-level `Agent` wrapper, `MultiAgentRuntime`, and `EnkiWorkflowRuntime`
-- JavaScript bindings exposing `NativeEnkiAgent`, `NativeMultiAgentRuntime`, `NativeWorkflowRuntime`, and traced run results
+- Python bindings exposing low-level FFI types plus the high-level `Agent` wrapper, `ToolRegistry`, `MultiAgentRuntime`, and `EnkiWorkflowRuntime`
+- JavaScript bindings exposing `NativeEnkiAgent`, `NativeToolRegistry`, `NativeMultiAgentRuntime`, `NativeWorkflowRuntime`, and traced run results
 
 Examples of supported model strings in the current codebase:
 
@@ -149,6 +150,7 @@ cargo run -p builder -- join
 The repository includes runnable examples under `example/`:
 
 - `example/basic-js/index.js`: basic JavaScript multi-agent runtime example
+- `example/basic-js/tool-registry.js`: JavaScript example showing a reusable `NativeToolRegistry` connected to an agent dynamically
 - `example/basic-js/custom-agent-loop.js`: JavaScript single-agent example overriding the default agentic loop in JavaScript
 - `example/basic-js/react-custom-agent-loop.js`: JavaScript single-agent example running a ReAct loop with direct LLM calls
 - `example/basic-js/multi-agent-tools-memory.js`: JavaScript example with researcher/coordinator agents, tool calling, and shared memory
@@ -157,6 +159,7 @@ The repository includes runnable examples under `example/`:
 - `example/basic-ts/human-intervention-workflow.ts`: TypeScript workflow example showing `human_gate` pauses and failure escalation interventions
 - `example/basic-ts/multi-agent-tools-memory.ts`: TypeScript example with researcher/coordinator agents, tool calling, and shared memory
 - `example/enki-py/simple_agent.py`: basic Python single-agent example
+- `example/enki-py/tool_registry.py`: Python example showing a reusable `ToolRegistry` connected to an agent dynamically
 - `example/enki-py/custom_agentic_loop.py`: Python single-agent example overriding the default agentic loop in Python
 - `example/enki-py/react_custom_agentic_loop.py`: Python single-agent example running a ReAct loop with direct LLM calls
 - `example/enki-py/compare_agent_loops.py`: Python comparison example running the same question through default, prompt-customized, planner, and ReAct loops
@@ -170,6 +173,7 @@ Run the Node examples from their example directories:
 cd example/basic-js
 npm install
 npm start
+npm run start:tool-registry
 npm run start:custom-agent-loop
 npm run start:react-custom-agent-loop
 npm run start:multi-agent-tools-memory
@@ -229,8 +233,15 @@ This repo contains the low-level Rust-backed binding implementation in `crates/b
 The Node.js binding in `crates/bindings/enki-js` exposes:
 
 - `NativeEnkiAgent`
+- `NativeToolRegistry`
 - `NativeMultiAgentRuntime`
 - `runWithTrace()` and `processWithTrace()` for traced execution
+
+The Python binding in `crates/bindings/enki-py` also exposes:
+
+- `ToolRegistry`
+- `Agent.connect_tool_registry(...)`
+- `Agent(tool_registry=...)`
 
 ## Persistence
 

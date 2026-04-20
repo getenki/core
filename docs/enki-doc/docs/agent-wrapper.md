@@ -20,6 +20,7 @@ The wrapper exposes:
 - `MemoryModule`
 - `RunContext`
 - `Tool`
+- `ToolRegistry`
 
 ## Create an agent
 
@@ -47,6 +48,7 @@ Common constructor parameters:
 - `max_iterations`: backend iteration limit
 - `workspace_home`: optional workspace root path
 - `tools`: optional list of prebuilt `Tool` instances
+- `tool_registry`: optional reusable `ToolRegistry`
 - `memories`: optional list of prebuilt `MemoryModule` instances
 
 ## Register memory
@@ -87,6 +89,25 @@ def get_player_name(ctx: RunContext[str]) -> str:
     """Get the player's name."""
     return ctx.deps
 ```
+
+### Reuse a `ToolRegistry`
+
+Use `ToolRegistry` when you want to register tools once and attach them to agents later:
+
+```python
+from enki_py import Agent, ToolRegistry
+
+registry = ToolRegistry()
+
+@registry.tool_plain
+def lookup_release_note(feature: str) -> str:
+    return f"release-note:{feature}"
+
+agent = Agent("ollama::qwen3.5:latest")
+agent.connect_tool_registry(registry)
+```
+
+You can also pass `tool_registry=registry` to `Agent(...)` during construction.
 
 ## Customize the loop
 

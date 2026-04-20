@@ -47,6 +47,7 @@ The main Python-facing exports are:
 - `AgentRunResult`
 - `ExecutionStep`
 - `Tool`
+- `ToolRegistry`
 - `RunContext`
 - `MemoryBackend`
 - `MemoryModule`
@@ -81,6 +82,7 @@ The generated module is also re-exported, so lower-level runtime types remain av
 - `max_iterations`: iteration cap for the runtime loop
 - `workspace_home`: optional workspace root for persisted runtime state
 - `tools`: optional list of pre-registered `Tool` objects
+- `tool_registry`: optional reusable `ToolRegistry`
 - `memories`: optional list of `MemoryModule` objects
 - `llm`: optional Python-side LLM backend or callback
 
@@ -93,6 +95,7 @@ Main methods:
 - `tool_plain(...)`: decorator for plain Python tools
 - `tool(...)`: decorator for tools that receive `RunContext`
 - `register_tool(...)`
+- `connect_tool_registry(...)`
 - `register_memory(...)`
 - `as_workflow_agent(...)`: converts the wrapper into a workflow-configured low-level agent
 
@@ -245,6 +248,8 @@ agent.connect_tool_registry(registry)
 ```
 
 You can also pass `tool_registry=registry` to `Agent(...)` during construction.
+
+This is the cleanest path when multiple agents should share the same tool catalog or when you want to prepare tools separately from agent creation.
 
 ## Memory
 
@@ -556,6 +561,7 @@ After building the local package with `maturin develop`, you can run the checked
 ```powershell
 python example\enki-py\simple_agent.py
 python example\enki-py\simple_agent_ollama.py
+python example\enki-py\tool_registry.py
 python example\enki-py\simple_multi_agent.py
 python example\enki-py\multi_agent_with_memory_and_tools.py
 python example\enki-py\agent_workflow.py

@@ -83,7 +83,7 @@ stateDiagram-v2
 The agent itself (`Agent`) is highly modular, depending on interfaces rather than implementations:
 - **`LlmProvider`**: Abstraction over the LLM. Enki allows bindings to inject virtual LLM providers that route requests out to Python or Node.js logic.
 - **`MemoryProvider` & `MemoryRouter`**: Pluggable long-term context.
-- **`ToolRegistry` & `ToolExecutor`**: Centralized mapping of available functions.
+- **`ToolRegistry` & `ToolExecutor`**: Centralized mapping of available functions. Registries can now be prepared separately and connected to agents dynamically, which lets bindings reuse the same tool pool across multiple agents instead of rebuilding tool lists per agent.
 
 ### Observability
 The core loop defines `ExecutionStep` instances that track index, phase, kind, and detail. These trigger `on_step` callbacks, bubble through the FFI boundary, and power the trace APIs exposed by Python (`on_step`, `AgentRunResult.steps`) and JavaScript (`runWithTrace`, `processWithTrace`).

@@ -24,10 +24,12 @@ This app depends on the local JavaScript bindings:
 That means you can use the same custom loop APIs shown in the checked-in Node examples:
 
 - prompt-level customization with the `agenticLoop` constructor argument
+- reusable tool registries with `NativeToolRegistry` and `agent.connectToolRegistry(...)`
 - full JavaScript loop overrides with `agent.setAgentLoopHandler(...)`
 
 Reference examples in this repository:
 
+- [`example/basic-js/tool-registry.js`](/I:/projects/enki/core-next/example/basic-js/tool-registry.js)
 - [`example/basic-js/custom-agent-loop.js`](/I:/projects/enki/core-next/example/basic-js/custom-agent-loop.js)
 - [`example/basic-js/react-custom-agent-loop.js`](/I:/projects/enki/core-next/example/basic-js/react-custom-agent-loop.js)
 

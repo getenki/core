@@ -12,6 +12,7 @@ This package is the current JavaScript surface. We are not publishing a WASM bin
 ## What it exposes
 
 - `NativeEnkiAgent`
+- `NativeToolRegistry`
 - `NativeMultiAgentRuntime`
 - `NativeWorkflowRuntime`
 - `JsAgentRunResult`
@@ -23,10 +24,11 @@ This package is the current JavaScript surface. We are not publishing a WASM bin
 - `JsMemoryEntry`
 - `JsMultiAgentMember`
 
-`NativeEnkiAgent` can be created in four modes:
+`NativeEnkiAgent` can be created in five modes:
 
 - `new NativeEnkiAgent(...)`
 - `NativeEnkiAgent.withTools(...)`
+- `NativeEnkiAgent.withToolRegistry(...)`
 - `NativeEnkiAgent.withMemory(...)`
 - `NativeEnkiAgent.withToolsAndMemory(...)`
 
@@ -222,6 +224,56 @@ You can also pass a shared `toolHandler` to `withTools(...)` or `withToolsAndMem
 - `agentDir`
 - `workspaceDir`
 - `sessionsDir`
+
+## Reusable tool registries
+
+Use `NativeToolRegistry` when you want to define tools once and attach them to one or more agents later.
+
+```js
+const { NativeEnkiAgent, NativeToolRegistry } = require('@getenki/ai')
+
+const registry = new NativeToolRegistry()
+registry.registerTools(
+  [
+    {
+      name: 'lookup_release_note',
+      description: 'Return a short release note for a named feature.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          feature: { type: 'string' },
+        },
+        required: ['feature'],
+      },
+    },
+  ],
+  (toolName, inputJson) => {
+    const args = inputJson ? JSON.parse(inputJson) : {}
+    return `${toolName}:${args.feature}`
+  },
+)
+
+const agent = new NativeEnkiAgent(
+  'Registry Agent',
+  'Use connected tools when they help.',
+  'ollama::qwen3.5:latest',
+  20,
+  process.cwd(),
+)
+
+agent.connectToolRegistry(registry)
+```
+
+`NativeToolRegistry` supports:
+
+- `new NativeToolRegistry(tools?, toolHandler?)`
+- `registry.registerTools(tools, toolHandler?)`
+- `registry.clear()`
+- `registry.toolNames()`
+- `registry.size`
+- `agent.connectToolRegistry(registry)`
+
+If you already have a registry prepared, you can also construct the agent with `NativeEnkiAgent.withToolRegistry(...)`.
 
 ## Memory
 
