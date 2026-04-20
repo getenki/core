@@ -4,7 +4,9 @@ use crate::memory::MemoryManager;
 use crate::registry::{AgentCard, AgentRegistry, AgentStatus, FirstMatchSelector, PeerSelector};
 use crate::tooling::delegation_tools::{DelegateTaskTool, DiscoverAgentsTool};
 use crate::tooling::tool_calling::{RegistryToolExecutor, ToolExecutor};
-use crate::tooling::types::{DelegateFn, Tool, ToolRegistry, WorkflowToolContext};
+use crate::tooling::types::{
+    DelegateFn, DelegationContext, Tool, ToolRegistry, WorkflowToolContext,
+};
 use crate::workflow::{TaskTarget, WorkflowTaskResult, WorkflowTaskRunner};
 use async_trait::async_trait;
 use serde_json::json;
@@ -22,6 +24,7 @@ use std::sync::Arc;
 pub struct MultiAgentRuntime {
     registry: Arc<AgentRegistry>,
     agents: HashMap<String, Arc<Agent>>,
+    delegate_fn: Arc<dyn DelegateFn>,
     #[allow(dead_code)]
     selector: Box<dyn PeerSelector>,
 }
@@ -56,7 +59,21 @@ impl MultiAgentRuntime {
             .get(agent_id)
             .ok_or_else(|| format!("Agent '{agent_id}' not found in runtime."))?;
 
-        Ok(agent.run_detailed(session_id, message, on_step).await)
+        Ok(agent
+            .run_detailed_with_context(
+                session_id,
+                message,
+                AgentExecutionContext {
+                    delegation: Some(DelegationContext::new(
+                        Arc::clone(&self.registry),
+                        agent_id,
+                        Arc::clone(&self.delegate_fn),
+                    )),
+                    ..Default::default()
+                },
+                on_step,
+            )
+            .await)
     }
 
     pub fn registry(&self) -> &Arc<AgentRegistry> {
@@ -180,6 +197,11 @@ impl WorkflowTaskRunner for MultiAgentRuntime {
                 AgentExecutionContext {
                     workspace_dir: Some(workspace_dir.to_path_buf()),
                     workflow: Some(metadata.clone()),
+                    delegation: Some(DelegationContext::new(
+                        Arc::clone(&self.registry),
+                        agent_id.clone(),
+                        Arc::clone(&self.delegate_fn),
+                    )),
                 },
                 None,
             )
@@ -359,9 +381,14 @@ impl MultiAgentRuntimeBuilder {
             agents.insert(spec.agent_id, Arc::new(agent));
         }
 
+        let delegate_fn: Arc<dyn DelegateFn> = Arc::new(RuntimeDelegateFn {
+            agents: agents.clone(),
+        });
+
         Ok(MultiAgentRuntime {
             registry,
             agents,
+            delegate_fn,
             selector,
         })
     }

@@ -141,6 +141,18 @@ Examples of model strings used in this workspace:
 
 The `simple_agent` and `multi_agent` examples expect either `ENKI_MODEL`, `AgentDefinition.model`, or an injected provider. The `runtime_builder` and `workflow` examples are self-contained and can be run without external model credentials.
 
+## Run the detached library examples
+
+If you want examples that look like a separate application crate consuming `enki-next` as a library, use `example/enki-rs`.
+
+These examples use a path dependency on `../../crates/core`, define their own `Cargo.toml`, and run outside the workspace package graph:
+
+- `cargo run --manifest-path example/enki-rs/Cargo.toml --bin runtime_builder_detailed`
+- `cargo run --manifest-path example/enki-rs/Cargo.toml --bin multi_agent_detailed`
+- `cargo run --manifest-path example/enki-rs/Cargo.toml --bin workflow_detailed`
+
+This is the best reference when you want to embed Enki in your own Rust binary instead of extending the internal crate examples.
+
 ## Build the workspace
 
 From the repository root:

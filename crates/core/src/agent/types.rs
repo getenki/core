@@ -1,4 +1,5 @@
 use crate::tooling::types::WorkflowToolContext;
+use crate::tooling::types::DelegationContext;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -24,10 +25,11 @@ impl Default for AgentDefinition {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default)]
 pub struct AgentExecutionContext {
     pub workspace_dir: Option<PathBuf>,
     pub workflow: Option<WorkflowToolContext>,
+    pub delegation: Option<DelegationContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

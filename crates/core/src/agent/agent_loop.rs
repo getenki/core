@@ -330,6 +330,7 @@ impl DefaultAgentLoop {
             session_id,
             exec_ctx.workspace_dir.clone(),
             exec_ctx.workflow.clone(),
+            exec_ctx.delegation.clone(),
         );
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -485,6 +486,7 @@ impl AgentLoop for DefaultAgentLoop {
             session_id,
             exec_ctx.workspace_dir.clone(),
             exec_ctx.workflow.clone(),
+            exec_ctx.delegation.clone(),
         );
         ctx.human = human;
         let mut steps = Vec::new();
@@ -727,6 +729,7 @@ impl AgentLoop for CallbackAgentLoop {
             session_id,
             exec_ctx.workspace_dir.clone(),
             exec_ctx.workflow.clone(),
+            exec_ctx.delegation.clone(),
         );
         ctx.human = human;
 

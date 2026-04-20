@@ -50,3 +50,17 @@ The runtime persists workflow state under the configured workspace home and supp
 - `submit_intervention(run_id, intervention_id, response)` for human-gate responses
 
 For a complete runnable example with reusable tasks, inline tasks, transforms, decisions, joins, and persisted runs, see `cargo run -p enki-next --example workflow`.
+
+If you want the same workflow concepts demonstrated from a separate consumer crate, run:
+
+```powershell
+cargo run --manifest-path example/enki-rs/Cargo.toml --bin workflow_detailed
+```
+
+That example shows:
+
+- a detached Rust app crate depending on `enki-next`
+- a reusable task plus an inline task
+- a custom transform registered by the application
+- a `human_gate` pause, intervention submission, and `resume(...)`
+- persisted run inspection with `inspect(...)` and `list_runs()`

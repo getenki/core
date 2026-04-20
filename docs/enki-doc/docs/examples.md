@@ -96,6 +96,9 @@ The repository currently includes these runnable examples:
 - `crates/core/examples/runtime_builder.rs`: `RuntimeBuilder` example that registers a custom Rust tool and uses a mock LLM provider
 - `crates/core/examples/multi_agent.rs`: Rust multi-agent runtime with discovery and delegation
 - `crates/core/examples/workflow.rs`: workflow runtime with reusable tasks, inline tasks, transforms, decisions, joins, and persisted run state
+- `example/enki-rs/src/bin/runtime_builder_detailed.rs`: detached Rust app crate showing how an external consumer uses `RuntimeBuilder` with a custom tool and mocked provider
+- `example/enki-rs/src/bin/multi_agent_detailed.rs`: detached Rust app crate showing `MultiAgentRuntime` agent discovery, delegation, and deterministic orchestration
+- `example/enki-rs/src/bin/workflow_detailed.rs`: detached Rust app crate showing `WorkflowRuntime` with reusable tasks, inline tasks, a custom transform, a human gate, persisted runs, and resume
 
 ### Python
 
