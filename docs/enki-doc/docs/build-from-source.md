@@ -14,6 +14,21 @@ This page is for contributors working in the `core-next` workspace.
 - `maturin`
 - Node.js `>=18` if you want to run the docs site
 
+## Build the Rust library
+
+From the repository root:
+
+```bash
+cargo build -p core
+cargo test -p core
+```
+
+Before publishing the crate to crates.io, validate the package layout:
+
+```bash
+cargo package -p core --allow-dirty
+```
+
 ## Build the Python package locally
 
 From `crates/bindings/enki-py`:

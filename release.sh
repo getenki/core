@@ -4,6 +4,22 @@ set -euo pipefail
 VERSION=${1:-}
 TARGETS=${2:-} # Optional: e.g., "js,py" or "rs"
 
+CURRENT_VERSION=$(awk '
+  /^\[workspace\.package\]$/ { in_workspace=1; next }
+  /^\[/ { in_workspace=0 }
+  in_workspace && /^version = "/ {
+    sub(/^version = "/, "")
+    sub(/"$/, "")
+    print
+    exit
+  }
+' Cargo.toml)
+
+if [[ -z "$CURRENT_VERSION" ]]; then
+  echo "Failed to determine current workspace version from Cargo.toml."
+  exit 1
+fi
+
 # Usage help
 if [[ "$VERSION" == "-h" ]] || [[ "$VERSION" == "--help" ]]; then
   echo "Usage: ./release.sh [VERSION] [TARGETS]"
@@ -23,7 +39,7 @@ fi
 
 # 1. Cleanliness Check
 if [[ -n $(git status --porcelain) ]]; then
-  echo "❌ Error: Git directory is dirty. Please commit or stash changes first."
+  echo "Error: Git directory is dirty. Please commit or stash changes first."
   exit 1
 fi
 
@@ -35,14 +51,18 @@ run_cmd() {
 }
 
 UPDATED_FILES=""
-echo "🚀 Preparing release for version $VERSION..."
+echo "Preparing release for version $VERSION..."
 
 # 2. Update Manifests (Adjust paths if files are in subfolders)
 if should_update "rs"; then
   perl -0pi -e "s/(\[workspace\.package\][\s\S]*?^version = \").*?(\")/\${1}$VERSION\${2}/m" Cargo.toml
   run_cmd cargo generate-lockfile
   UPDATED_FILES+=" Cargo.toml Cargo.lock"
-  echo "✅ Updated Cargo.toml"
+  perl -0pi -e "s/\Q$CURRENT_VERSION\E/$VERSION/g" README.md
+  perl -0pi -e "s/\Q$CURRENT_VERSION\E/$VERSION/g" crates/core/README.md
+  perl -0pi -e "s/\Q$CURRENT_VERSION\E/$VERSION/g" docs/enki-doc/docs/rust.md
+  UPDATED_FILES+=" README.md crates/core/README.md docs/enki-doc/docs/rust.md"
+  echo "Updated Cargo.toml"
 fi
 
 if should_update "js"; then
@@ -52,14 +72,14 @@ if should_update "js"; then
     run_cmd npm version "$VERSION" --no-git-tag-version
   )
   UPDATED_FILES+=" crates/bindings/enki-js/package.json crates/bindings/enki-js/package-lock.json"
-  echo "✅ Updated package.json"
+  echo "Updated package.json"
 fi
 
 if should_update "py"; then
   perl -0pi -e "s/(\[package\][\s\S]*?^version = \").*?(\")/\${1}$VERSION\${2}/m" crates/bindings/enki-py/Cargo.toml
   run_cmd cargo generate-lockfile
   UPDATED_FILES+=" crates/bindings/enki-py/Cargo.toml Cargo.lock"
-  echo "✅ Updated crates/bindings/enki-py/Cargo.toml for Python"
+  echo "Updated crates/bindings/enki-py/Cargo.toml for Python"
 fi
 
 # 3. Commit and Tag
@@ -76,13 +96,13 @@ fi
 if [ -z "$TARGETS" ]; then
   echo "Creating global release tag..."
   run_cmd git tag "v$VERSION" # Trigger all
-  echo "🏷️  Created global tag: v$VERSION"
+  echo "Created global tag: v$VERSION"
 else
   IFS=',' read -ra ADDR <<< "$TARGETS"
   for i in "${ADDR[@]}"; do
     echo "Creating selective release tag for $i..."
     run_cmd git tag "$i-v$VERSION" # Trigger specific
-    echo "🏷️  Created selective tag: $i-v$VERSION"
+    echo "Created selective tag: $i-v$VERSION"
   done
 fi
 
@@ -90,4 +110,4 @@ fi
 current_branch=$(git branch --show-current)
 echo "Pushing commit and tags to origin/$current_branch..."
 run_cmd git push origin "$current_branch" --tags
-echo "🎉 Release $VERSION dispatched to GitHub from branch $current_branch!"
+echo "Release $VERSION dispatched to GitHub from branch $current_branch!"

@@ -64,6 +64,43 @@ function Replace-FirstMatch {
     [System.IO.File]::WriteAllText((Resolve-Path $Path), $updated, [System.Text.UTF8Encoding]::new($false))
 }
 
+function Replace-AllLiteral {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OldValue,
+
+        [Parameter(Mandatory = $true)]
+        [string]$NewValue
+    )
+
+    $content = Get-Content -Raw -Path $Path
+    $updated = $content.Replace($OldValue, $NewValue)
+
+    if ($content -eq $updated) {
+        throw "No literal match found in $Path for value: $OldValue"
+    }
+
+    [System.IO.File]::WriteAllText((Resolve-Path $Path), $updated, [System.Text.UTF8Encoding]::new($false))
+}
+
+function Get-WorkspaceVersion {
+    $content = Get-Content -Raw -Path "Cargo.toml"
+    $regex = [System.Text.RegularExpressions.Regex]::new(
+        '(?ms)^\[workspace\.package\].*?^version = "([^"]+)"',
+        [System.Text.RegularExpressions.RegexOptions]::Multiline
+    )
+    $match = $regex.Match($content)
+
+    if (-not $match.Success) {
+        throw "Unable to determine current workspace version from Cargo.toml."
+    }
+
+    return $match.Groups[1].Value
+}
+
 function Get-SelectedTargets {
     param([string]$RawTargets)
 
@@ -103,6 +140,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 }
 
 $selectedTargets = @(Get-SelectedTargets -RawTargets $Targets)
+$currentVersion = Get-WorkspaceVersion
 $dirty = & git status --porcelain
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to inspect git status."
@@ -121,6 +159,12 @@ if (Should-Update -SelectedTargets $selectedTargets -Target "rs") {
     Invoke-External cargo generate-lockfile
     $updatedFiles.Add("Cargo.toml")
     $updatedFiles.Add("Cargo.lock")
+    Replace-AllLiteral -Path "README.md" -OldValue $currentVersion -NewValue $Version
+    Replace-AllLiteral -Path "crates/core/README.md" -OldValue $currentVersion -NewValue $Version
+    Replace-AllLiteral -Path "docs/enki-doc/docs/rust.md" -OldValue $currentVersion -NewValue $Version
+    $updatedFiles.Add("README.md")
+    $updatedFiles.Add("crates/core/README.md")
+    $updatedFiles.Add("docs/enki-doc/docs/rust.md")
     Write-Host "Updated Cargo.toml"
 }
 

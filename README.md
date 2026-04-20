@@ -58,6 +58,13 @@ Examples of supported model strings in the current codebase:
 
 ## Install
 
+For Rust consumers, depend on the published library package and import it as `core_next`:
+
+```toml
+[dependencies]
+core_next = { package = "core", version = "0.5.61" }
+```
+
 For users of the published Python package, the docs currently recommend:
 
 ```bash
@@ -255,7 +262,7 @@ The `test/.atomiagent/...` fixtures show the expected on-disk layout.
 
 ## Notes
 
-- The current workspace version is `0.1.3`.
+- The current workspace version is `0.5.61`.
 - The Rust package name is `core`, and the exported library name is `core_next`.
 - The docs site currently brands Enki publicly as in active development/private preview while the open-source core and `enki-py` docs are already published.
 
