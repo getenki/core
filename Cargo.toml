@@ -4,7 +4,7 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
-version = "0.5.76"
+version = "0.5.77"
 
 [workspace.dependencies]
 async-trait = "0.1.89"

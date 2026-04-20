@@ -1,6 +1,6 @@
 {
   "name": "@getenki/ai",
-  "version": "0.5.76",
+  "version": "0.5.77",
   "description": "Node.js bindings for Enki's Rust agent runtime.",
   "main": "index.js",
   "types": "index.d.ts",
@@ -113,11 +113,11 @@
     "arrowParens": "always"
   },
   "optionalDependencies": {
-    "@getenki/ai-darwin-arm64": "0.5.76",
-    "@getenki/ai-darwin-x64": "0.5.76",
-    "@getenki/ai-linux-arm64-gnu": "0.5.76",
-    "@getenki/ai-linux-x64-gnu": "0.5.76",
-    "@getenki/ai-win32-arm64-msvc": "0.5.76",
-    "@getenki/ai-win32-x64-msvc": "0.5.76"
+    "@getenki/ai-darwin-arm64": "0.5.77",
+    "@getenki/ai-darwin-x64": "0.5.77",
+    "@getenki/ai-linux-arm64-gnu": "0.5.77",
+    "@getenki/ai-linux-x64-gnu": "0.5.77",
+    "@getenki/ai-win32-arm64-msvc": "0.5.77",
+    "@getenki/ai-win32-x64-msvc": "0.5.77"
   }
 }
