@@ -218,6 +218,34 @@ Tool schemas are inferred from Python signatures and type annotations. Required 
 
 If you need lower-level control, you can also build `Tool(...)` values directly and register them with `register_tool(...)`.
 
+### Reusable `ToolRegistry`
+
+If you want to manage a shared set of tools separately from a single agent, build a `ToolRegistry` and connect it when needed:
+
+```python
+from enki_py import Agent, ToolRegistry
+
+
+registry = ToolRegistry()
+
+
+@registry.tool_plain
+def lookup_release(version: str) -> str:
+    """Return a canned release note."""
+    return f"Release {version} is ready."
+
+
+agent = Agent(
+    "ollama::qwen3.5:latest",
+    name="Registry Agent",
+    instructions="Use connected tools when they help.",
+)
+
+agent.connect_tool_registry(registry)
+```
+
+You can also pass `tool_registry=registry` to `Agent(...)` during construction.
+
 ## Memory
 
 `enki-py` supports Python-defined memory modules through `MemoryBackend` and `MemoryModule`.

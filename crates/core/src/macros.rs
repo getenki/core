@@ -31,7 +31,7 @@ macro_rules! register_tools {
     ($($tool_type:ident),+ $(,)?) => {{
         let mut registry: crate::tooling::types::ToolRegistry = std::collections::BTreeMap::new();
         $(
-            let tool: Box<dyn crate::tooling::types::Tool> = Box::new($tool_type);
+            let tool: std::sync::Arc<dyn crate::tooling::types::Tool> = std::sync::Arc::new($tool_type);
             registry.insert(tool.name().to_string(), tool);
         )+
         registry

@@ -6,6 +6,7 @@ use crate::tooling::tool_calling::ToolExecutor;
 use crate::tooling::types::{Tool, ToolRegistry};
 use async_trait::async_trait;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub type AgentRuntime = Runtime<AgentRuntimeHandler>;
 
@@ -49,12 +50,13 @@ impl RuntimeBuilder {
         T: Tool + 'static,
     {
         self.tool_registry
-            .insert(tool.name().to_string(), Box::new(tool));
+            .insert(tool.name().to_string(), Arc::new(tool));
         self
     }
 
     pub fn register_boxed_tool(mut self, tool: Box<dyn Tool>) -> Self {
-        self.tool_registry.insert(tool.name().to_string(), tool);
+        self.tool_registry
+            .insert(tool.name().to_string(), Arc::<dyn Tool>::from(tool));
         self
     }
 
@@ -92,7 +94,7 @@ impl RuntimeBuilder {
         use crate::tooling::human_tools::AskHumanTool;
         tool_registry.insert(
             "ask_human".to_string(),
-            Box::new(AskHumanTool) as Box<dyn Tool>,
+            Arc::new(AskHumanTool) as Arc<dyn Tool>,
         );
 
         let tool_executor = tool_executor

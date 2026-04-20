@@ -3,6 +3,7 @@
 export declare class NativeEnkiAgent {
   constructor(name?: string | undefined | null, systemPromptPreamble?: string | undefined | null, model?: string | undefined | null, maxIterations?: number | undefined | null, workspaceHome?: string | undefined | null, agenticLoop?: string | undefined | null)
   static withTools(name: string | undefined | null, systemPromptPreamble: string | undefined | null, model: string | undefined | null, maxIterations: number | undefined | null, workspaceHome: string | undefined | null, tools: Array<object>, toolHandler?: SharedToolCallback | undefined | null, agenticLoop?: string | undefined | null): NativeEnkiAgent
+  static withToolRegistry(name: string | undefined | null, systemPromptPreamble: string | undefined | null, model: string | undefined | null, maxIterations: number | undefined | null, workspaceHome: string | undefined | null, toolRegistry: NativeToolRegistry, agenticLoop?: string | undefined | null): NativeEnkiAgent
   static withMemory(name: string | undefined | null, systemPromptPreamble: string | undefined | null, model: string | undefined | null, maxIterations: number | undefined | null, workspaceHome: string | undefined | null, memories: Array<JsMemoryModule>, recordHandler: RecordCallback, recallHandler: RecallCallback, flushHandler: SessionCallback, consolidateHandler: SessionCallback, agenticLoop?: string | undefined | null): NativeEnkiAgent
   static withToolsAndMemory(name: string | undefined | null, systemPromptPreamble: string | undefined | null, model: string | undefined | null, maxIterations: number | undefined | null, workspaceHome: string | undefined | null, tools: Array<object>, toolHandler: SharedToolCallback | undefined | null, memories: Array<JsMemoryModule>, recordHandler: RecordCallback, recallHandler: RecallCallback, flushHandler: SessionCallback, consolidateHandler: SessionCallback, agenticLoop?: string | undefined | null): NativeEnkiAgent
   run(sessionId: string, userMessage: string): Promise<string>
@@ -10,6 +11,7 @@ export declare class NativeEnkiAgent {
   configureWorkflow(agentId: string, capabilities: Array<string>): void
   setAgentLoopHandler(handler: LoopCallback): void
   clearAgentLoopHandler(): void
+  connectToolRegistry(toolRegistry: NativeToolRegistry): void
 }
 
 export declare class NativeMultiAgentRuntime {
@@ -18,6 +20,14 @@ export declare class NativeMultiAgentRuntime {
   processWithTrace(agentId: string, sessionId: string, userMessage: string): Promise<JsAgentRunResult>
   registry(): Promise<Array<JsAgentCard>>
   discover(capability?: string | undefined | null, status?: JsAgentStatus | undefined | null): Promise<Array<JsAgentCard>>
+}
+
+export declare class NativeToolRegistry {
+  constructor(tools?: Array<object> | undefined | null, toolHandler?: SharedToolCallback | undefined | null)
+  registerTools(tools: Array<object>, toolHandler?: SharedToolCallback | undefined | null): void
+  clear(): void
+  toolNames(): Array<string>
+  get size(): number
 }
 
 export declare class NativeWorkflowRuntime {

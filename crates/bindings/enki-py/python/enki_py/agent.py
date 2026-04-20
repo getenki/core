@@ -217,6 +217,37 @@ class Tool:
         )
 
 
+class ToolRegistry:
+    def __init__(self, tools: list[Tool] | None = None) -> None:
+        self._tools: dict[str, Tool] = {}
+        if tools:
+            for tool in tools:
+                self.register_tool(tool)
+
+    def register_tool(self, tool: Tool) -> Tool:
+        self._tools[tool.name] = tool
+        return tool
+
+    def tool_plain(self, func: Callable[..., Any]) -> Callable[..., Any]:
+        self.register_tool(Tool.from_function(func, uses_context=False))
+        return func
+
+    def tool(self, func: Callable[..., Any]) -> Callable[..., Any]:
+        signature = inspect.signature(func)
+        parameters = list(signature.parameters.values())
+        if not parameters:
+            raise TypeError(f"Tool '{func.__name__}' must accept a RunContext argument")
+        self.register_tool(Tool.from_function(func, uses_context=True))
+        return func
+
+    def extend(self, other: "ToolRegistry") -> None:
+        for tool in other.tools():
+            self.register_tool(tool)
+
+    def tools(self) -> list[Tool]:
+        return list(self._tools.values())
+
+
 @dataclass(frozen=True)
 class MemoryModule:
     """Python memory callbacks.
@@ -836,6 +867,7 @@ class Agent(Generic[DepsT]):
             max_iterations: int = 20,
             workspace_home: str | None = None,
             tools: list[Tool] | None = None,
+            tool_registry: ToolRegistry | None = None,
             memories: list[MemoryModule] | None = None,
             llm: LlmProviderBackend | Callable[[str, list[dict[str, Any]], list[dict[str, Any]]], Any] | None = None,
     ) -> None:
@@ -859,6 +891,8 @@ class Agent(Generic[DepsT]):
         if tools:
             for tool in tools:
                 self.register_tool(tool)
+        if tool_registry is not None:
+            self.connect_tool_registry(tool_registry)
         if memories:
             for memory in memories:
                 self.register_memory(memory)
@@ -879,6 +913,11 @@ class Agent(Generic[DepsT]):
         self._tools[tool.name] = tool
         self._dirty = True
         return tool
+
+    def connect_tool_registry(self, tool_registry: ToolRegistry) -> ToolRegistry:
+        for tool in tool_registry.tools():
+            self.register_tool(tool)
+        return tool_registry
 
     def register_memory(self, memory: MemoryModule) -> MemoryModule:
         self._memories[memory.name] = memory

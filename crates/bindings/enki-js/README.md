@@ -290,6 +290,77 @@ Instead of putting `execute` on every tool, you can pass a shared `toolHandler` 
 - `workspaceDir`
 - `sessionsDir`
 
+### Reusable Tool Registries
+
+If you want to manage a shared pool of tools and attach it to multiple agents later, create a `NativeToolRegistry` and connect it dynamically:
+
+```js
+const { NativeEnkiAgent, NativeToolRegistry } = require('@getenki/ai')
+
+const registry = new NativeToolRegistry()
+registry.registerTools(
+  [
+    {
+      name: 'lookup_release',
+      description: 'Return a canned release note.',
+      parametersJson: JSON.stringify({
+        type: 'object',
+        properties: {
+          version: { type: 'string' },
+        },
+        required: ['version'],
+      }),
+    },
+  ],
+  (toolName, inputJson) => JSON.stringify({ toolName, inputJson }),
+)
+
+const agent = new NativeEnkiAgent(
+  'Registry Agent',
+  'Use connected tools when they help.',
+  'ollama::qwen3.5:latest',
+  20,
+  process.cwd(),
+)
+
+agent.connectToolRegistry(registry)
+```
+
+You can also construct the agent directly from a registry with `NativeEnkiAgent.withToolRegistry(...)`.
+
+TypeScript uses the same API:
+
+```ts
+import { NativeEnkiAgent, NativeToolRegistry } from '@getenki/ai'
+
+const registry = new NativeToolRegistry()
+registry.registerTools(
+  [
+    {
+      name: 'lookup_release',
+      description: 'Return a canned release note.',
+      parameters: {
+        type: 'object',
+        properties: {
+          version: { type: 'string' },
+        },
+        required: ['version'],
+      },
+    },
+  ],
+  (toolName: string, inputJson: string) => JSON.stringify({ toolName, inputJson }),
+)
+
+const agent = NativeEnkiAgent.withToolRegistry(
+  'Registry Agent',
+  'Use connected tools when they help.',
+  'ollama::qwen3.5:latest',
+  20,
+  process.cwd(),
+  registry,
+)
+```
+
 ## Memory
 
 Memory modules are plain objects:

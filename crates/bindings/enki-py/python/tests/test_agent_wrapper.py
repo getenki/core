@@ -212,6 +212,29 @@ def test_wrapper_registers_concrete_tool_objects(monkeypatch):
     assert handler.execute("format_score", json.dumps({"total": 7}), "", "", "") == "score:7"
 
 
+def test_wrapper_connects_reusable_tool_registry(monkeypatch):
+    monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
+    monkeypatch.setattr(agent_module, "LiteLlmProvider", FakeLiteLlmProvider)
+
+    registry = agent_module.ToolRegistry()
+
+    @registry.tool_plain
+    def lookup_status() -> str:
+        """Return a canned status value."""
+        return "ready"
+
+    agent = agent_module.Agent("test-model")
+    connected = agent.connect_tool_registry(registry)
+
+    assert connected is registry
+
+    result = agent.run_sync("hello")
+    assert result.output == "default llm:test-model:hello"
+
+    tools = FakeEnkiAgent.last_kwargs["tools"]
+    assert {tool.name for tool in tools} == {"lookup_status"}
+
+
 def test_tool_handler_returns_error_string_for_invalid_args(monkeypatch):
     monkeypatch.setattr(agent_module, "_LowLevelEnkiAgent", FakeEnkiAgent)
     monkeypatch.setattr(agent_module, "LiteLlmProvider", FakeLiteLlmProvider)
