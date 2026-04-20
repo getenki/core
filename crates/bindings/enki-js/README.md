@@ -19,6 +19,7 @@ The package ships prebuilt native binaries for:
 The current package surface is:
 
 - `NativeEnkiAgent`
+- `NativeToolRegistry`
 - `NativeMultiAgentRuntime`
 - `NativeWorkflowRuntime`
 - `JsAgentStatus`
@@ -29,12 +30,21 @@ The current package surface is:
 - `JsAgentRunResult`
 - `JsExecutionStep`
 
-`NativeEnkiAgent` is the main entrypoint. It can be created in four modes:
+`NativeEnkiAgent` is the main entrypoint. It can be created in five modes:
 
 - `new(...)` for a plain agent
 - `NativeEnkiAgent.withTools(...)`
+- `NativeEnkiAgent.withToolRegistry(...)`
 - `NativeEnkiAgent.withMemory(...)`
 - `NativeEnkiAgent.withToolsAndMemory(...)`
+
+`NativeToolRegistry` supports:
+
+- `new(...)`
+- `registerTools(...)`
+- `clear()`
+- `toolNames()`
+- `size`
 
 It also supports two loop customization levels:
 
@@ -327,6 +337,8 @@ agent.connectToolRegistry(registry)
 ```
 
 You can also construct the agent directly from a registry with `NativeEnkiAgent.withToolRegistry(...)`.
+
+This is the cleanest path when multiple agents should share the same tool catalog or when tools need to be connected after agent construction.
 
 TypeScript uses the same API:
 
@@ -679,6 +691,7 @@ JavaScript example:
 cd example/basic-js
 npm install
 npm start
+npm run start:tool-registry
 npm run start:custom-agent-loop
 npm run start:react-custom-agent-loop
 npm run start:multi-agent-tools-memory

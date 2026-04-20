@@ -10,6 +10,7 @@ Use `@getenki/ai` from TypeScript when you want typed access to Enki's native No
 The generated declarations currently expose:
 
 - `NativeEnkiAgent`
+- `NativeToolRegistry`
 - `NativeMultiAgentRuntime`
 - `NativeWorkflowRuntime`
 - `JsAgentStatus`
@@ -97,6 +98,45 @@ const agent = NativeEnkiAgent.withTools(
   null,
 )
 ```
+
+## Reusable tool registries
+
+```ts
+import { NativeEnkiAgent, NativeToolRegistry } from '@getenki/ai'
+
+const registry = new NativeToolRegistry()
+registry.registerTools(
+  [
+    {
+      name: 'lookup_release_note',
+      description: 'Return a short release note for a named feature.',
+      parameters: {
+        type: 'object',
+        properties: {
+          feature: { type: 'string' },
+        },
+        required: ['feature'],
+      },
+    },
+  ],
+  (toolName: string, inputJson: string): string => {
+    const args = inputJson ? (JSON.parse(inputJson) as { feature?: string }) : {}
+    return `${toolName}:${args.feature ?? ''}`
+  },
+)
+
+const agent = new NativeEnkiAgent(
+  'Registry Agent',
+  'Use connected tools when they help.',
+  'ollama::qwen3.5:latest',
+  20,
+  process.cwd(),
+)
+
+agent.connectToolRegistry(registry)
+```
+
+You can also create the agent directly from a prepared registry with `NativeEnkiAgent.withToolRegistry(...)`.
 
 ## Typed memory
 
