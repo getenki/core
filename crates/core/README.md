@@ -2,11 +2,13 @@
 
 `enki-next` is Enki's Rust runtime library. It provides the shared agent, workflow, memory, registry, tooling, and LLM provider abstractions used by the higher-level SDKs and local CLI entrypoints.
 
-The crate is published as package `enki-next`, and the Rust import name is `enki_next`.
+The crate is packaged as `enki-next`, and the Rust import name is `enki_next`.
 
 ## Install
 
-Add the crate to your Rust project with a rename so the import path stays explicit:
+Within this workspace, the package is available locally as `enki-next`.
+
+After publishing, add it to your Rust project with a rename so the import path stays explicit:
 
 ```toml
 [dependencies]
@@ -83,4 +85,4 @@ The `simple_agent` and `multi_agent` examples use the built-in tool registry and
 
 ## Release posture
 
-This workspace keeps the binary target for local development, but the publishable surface is the Rust library in `crates/core`. The crate README and docs are intentionally focused on the reusable API that external users will depend on from crates.io.
+This workspace keeps the binary target for local development, but the reusable Rust surface lives in `crates/core`. The crate README and docs are intentionally focused on the API that external users can depend on once the package is published.

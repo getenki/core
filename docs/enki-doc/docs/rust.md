@@ -7,9 +7,11 @@ slug: /rust
 
 The Rust workspace contains Enki's core runtime and the language bindings built on top of it. If you are consuming Enki from Rust, the crate you use is `enki-next`, imported as `enki_next`.
 
-## Published library
+## Rust package
 
-The publishable Rust crate is the `enki-next` package, imported in Rust as `enki_next`:
+The Rust crate in this workspace is packaged as `enki-next` and imported in Rust as `enki_next`.
+
+After publishing, consumers can depend on it like this:
 
 ```toml
 [dependencies]

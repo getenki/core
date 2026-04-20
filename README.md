@@ -58,7 +58,9 @@ Examples of supported model strings in the current codebase:
 
 ## Install
 
-For Rust consumers, depend on the published library package and import it as `enki_next`:
+The Rust library package in this workspace is `enki-next`, imported in code as `enki_next`.
+
+After publishing, Rust consumers can depend on it like this:
 
 ```toml
 [dependencies]
