@@ -10,14 +10,14 @@ Add the crate to your Rust project with a rename so the import path stays explic
 
 ```toml
 [dependencies]
-enki_next = { package = "enki-next", version = "0.5.61" }
+enki_next = { package = "enki-next", version = "0.5.75" }
 ```
 
 If you want the bundled universal LLM provider used by the local CLI and examples, enable the feature explicitly:
 
 ```toml
 [dependencies]
-enki_next = { package = "enki-next", version = "0.5.61", features = ["universal-llm-provider"] }
+enki_next = { package = "enki-next", version = "0.5.75", features = ["universal-llm-provider"] }
 ```
 
 ## Main modules

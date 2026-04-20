@@ -62,7 +62,7 @@ For Rust consumers, depend on the published library package and import it as `en
 
 ```toml
 [dependencies]
-enki_next = { package = "enki-next", version = "0.5.61" }
+enki_next = { package = "enki-next", version = "0.5.75" }
 ```
 
 For users of the published Python package, the docs currently recommend:
@@ -262,7 +262,7 @@ The `test/.atomiagent/...` fixtures show the expected on-disk layout.
 
 ## Notes
 
-- The current workspace version is `0.5.61`.
+- The current workspace version is `0.5.75`.
 - The Rust package name is `enki-next`, and the exported library name is `enki_next`.
 - The docs site currently brands Enki publicly as in active development/private preview while the open-source core and `enki-py` docs are already published.
 
