@@ -712,7 +712,9 @@ impl NativeEnkiAgent {
 
   #[napi(js_name = "setAgentLoopHandler")]
   pub fn set_agent_loop_handler(&self, handler: LoopCallback<'_>) -> napi::Result<()> {
-    self.inner.set_agent_loop_handler(build_loop_handler(handler)?)
+    self
+      .inner
+      .set_agent_loop_handler(build_loop_handler(handler)?)
   }
 
   #[napi(js_name = "clearAgentLoopHandler")]

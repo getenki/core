@@ -797,30 +797,31 @@ impl EnkiAgent {
                 }
             };
 
-            let mut agent =
-                match runtime.block_on(Agent::with_definition_tool_registry_executor_and_workspace(
+            let mut agent = match runtime.block_on(
+                Agent::with_definition_tool_registry_executor_and_workspace(
                     definition,
                     ToolRegistry::new(),
                     Box::new(RegistryToolExecutor),
                     workspace_home,
-                )) {
-                    Ok(agent) => agent,
-                    Err(error) => {
-                        let message = format!("Initialization error: {error}");
-                        for message_request in request_rx {
-                            match message_request {
-                                AgentWorkerMessage::Run(request) => {
-                                    let _ = request.reply_tx.send(error_run_result(message.clone()));
-                                }
-                                AgentWorkerMessage::SetLoopHandler { reply_tx, .. }
-                                | AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
-                                    let _ = reply_tx.send(Err(message.clone()));
-                                }
+                ),
+            ) {
+                Ok(agent) => agent,
+                Err(error) => {
+                    let message = format!("Initialization error: {error}");
+                    for message_request in request_rx {
+                        match message_request {
+                            AgentWorkerMessage::Run(request) => {
+                                let _ = request.reply_tx.send(error_run_result(message.clone()));
+                            }
+                            AgentWorkerMessage::SetLoopHandler { reply_tx, .. }
+                            | AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
+                                let _ = reply_tx.send(Err(message.clone()));
                             }
                         }
-                        return;
                     }
-                };
+                    return;
+                }
+            };
 
             for message_request in request_rx {
                 match message_request {
@@ -834,9 +835,10 @@ impl EnkiAgent {
                         let _ = request.reply_tx.send(response);
                     }
                     AgentWorkerMessage::SetLoopHandler { handler, reply_tx } => {
-                        agent.agent_loop = Box::new(CallbackAgentLoop::new(Arc::new(
-                            PythonAgentLoop { handler },
-                        )));
+                        agent.agent_loop =
+                            Box::new(CallbackAgentLoop::new(Arc::new(PythonAgentLoop {
+                                handler,
+                            })));
                         let _ = reply_tx.send(Ok(()));
                     }
                     AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
@@ -936,7 +938,8 @@ impl EnkiAgent {
                         for message_request in request_rx {
                             match message_request {
                                 AgentWorkerMessage::Run(request) => {
-                                    let _ = request.reply_tx.send(error_run_result(message.clone()));
+                                    let _ =
+                                        request.reply_tx.send(error_run_result(message.clone()));
                                 }
                                 AgentWorkerMessage::SetLoopHandler { reply_tx, .. }
                                 | AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
@@ -999,9 +1002,10 @@ impl EnkiAgent {
                         let _ = request.reply_tx.send(response);
                     }
                     AgentWorkerMessage::SetLoopHandler { handler, reply_tx } => {
-                        agent.agent_loop = Box::new(CallbackAgentLoop::new(Arc::new(
-                            PythonAgentLoop { handler },
-                        )));
+                        agent.agent_loop =
+                            Box::new(CallbackAgentLoop::new(Arc::new(PythonAgentLoop {
+                                handler,
+                            })));
                         let _ = reply_tx.send(Ok(()));
                     }
                     AgentWorkerMessage::ClearLoopHandler { reply_tx } => {
