@@ -10,6 +10,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js",
     "start:multi-agent-tools-memory": "node multi-agent-tools-memory.js",
+    "start:tool-registry": "node tool-registry.js",
     "start:custom-agent-loop": "node custom-agent-loop.js",
     "start:react-custom-agent-loop": "node react-custom-agent-loop.js"
   },
