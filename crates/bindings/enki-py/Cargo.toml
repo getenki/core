@@ -9,7 +9,7 @@ name = "enki_py"
 crate-type = ["cdylib"]
 
 [dependencies]
-core_next = { package = "enki", path = "../../core", default-features = false }
+core_next = { package = "enki-next", path = "../../core", default-features = false }
 async-trait.workspace = true
 futures.workspace = true
 serde.workspace = true

@@ -380,7 +380,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "enki"
+name = "enki-cli"
+version = "0.5.61"
+dependencies = [
+ "async-trait",
+ "clap",
+ "enki-next",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml 1.1.2+spec-1.1.0",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "enki-next"
 version = "0.5.61"
 dependencies = [
  "async-trait",
@@ -394,25 +408,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "enki-cli"
-version = "0.5.61"
-dependencies = [
- "async-trait",
- "clap",
- "enki",
- "serde",
- "serde_json",
- "tokio",
- "toml 1.1.2+spec-1.1.0",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "enki-py"
 version = "0.5.61"
 dependencies = [
  "async-trait",
- "enki",
+ "enki-next",
  "futures",
  "serde",
  "serde_json",
@@ -427,7 +427,7 @@ name = "enki_js"
 version = "0.5.61"
 dependencies = [
  "async-trait",
- "enki",
+ "enki-next",
  "futures",
  "napi",
  "napi-build",

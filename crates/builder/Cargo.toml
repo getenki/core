@@ -14,7 +14,7 @@ universal-llm-provider = ["core_next/universal-llm-provider"]
 [dependencies]
 clap.workspace = true
 async-trait.workspace = true
-core_next = { path = "../core", package = "enki", features = [] }
+core_next = { path = "../core", package = "enki-next", features = [] }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
