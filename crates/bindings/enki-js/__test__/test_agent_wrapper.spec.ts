@@ -50,7 +50,7 @@ test.serial('test_agent_wrapper: custom loop handler overrides default loop', as
     null,
   )
 
-  agent.setAgentLoopHandler((requestJson) => {
+  agent.setAgentLoopHandler((requestJson: string) => {
     const request = JSON.parse(requestJson)
     return JSON.stringify({
       content: `custom:${request.user_message}`,
