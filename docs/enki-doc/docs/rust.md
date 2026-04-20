@@ -15,14 +15,14 @@ After publishing, consumers can depend on it like this:
 
 ```toml
 [dependencies]
-enki_next = { package = "enki-next", version = "0.5.79" }
+enki_next = { package = "enki-next", version = "0.5.80" }
 ```
 
 If you want the bundled universal LLM provider, enable the feature explicitly:
 
 ```toml
 [dependencies]
-enki_next = { package = "enki-next", version = "0.5.79", features = ["universal-llm-provider"] }
+enki_next = { package = "enki-next", version = "0.5.80", features = ["universal-llm-provider"] }
 ```
 
 ## Choose the Rust API
