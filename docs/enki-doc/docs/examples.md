@@ -5,7 +5,7 @@ slug: /examples
 
 # Examples
 
-These examples show the main ways to use Enki across Python, JavaScript, and TypeScript, including workflow orchestration and human-in-the-loop execution.
+These examples show the main ways to use Enki across Rust, Python, JavaScript, and TypeScript, including workflow orchestration and human-in-the-loop execution.
 
 ## Decorator-style tools
 
@@ -89,6 +89,13 @@ Custom memory callbacks support both synchronous functions and `async def` metho
 ## Repository examples
 
 The repository currently includes these runnable examples:
+
+### Rust
+
+- `crates/core/examples/simple_agent.rs`: low-level `Agent` example with a local task workspace
+- `crates/core/examples/runtime_builder.rs`: `RuntimeBuilder` example that registers a custom Rust tool and uses a mock LLM provider
+- `crates/core/examples/multi_agent.rs`: Rust multi-agent runtime with discovery and delegation
+- `crates/core/examples/workflow.rs`: workflow runtime with reusable tasks, inline tasks, transforms, decisions, joins, and persisted run state
 
 ### Python
 

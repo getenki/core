@@ -4,7 +4,7 @@
 //! LLM provider:
 //!
 //! ```powershell
-//! cargo run -p core --example workflow
+//! cargo run -p enki-next --example workflow
 //! ```
 
 use async_trait::async_trait;

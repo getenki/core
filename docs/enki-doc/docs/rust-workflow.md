@@ -49,4 +49,4 @@ The runtime persists workflow state under the configured workspace home and supp
 - `resume(run_id)` for paused or interrupted runs
 - `submit_intervention(run_id, intervention_id, response)` for human-gate responses
 
-For a complete runnable example with reusable tasks, inline tasks, transforms, decisions, joins, and persisted runs, see `cargo run -p core --example workflow`.
+For a complete runnable example with reusable tasks, inline tasks, transforms, decisions, joins, and persisted runs, see `cargo run -p enki-next --example workflow`.

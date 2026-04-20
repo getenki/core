@@ -7,7 +7,7 @@ fn usage(program: &str) {
     eprintln!(
         "Usage: {program} <prompt>\n\
          Optional env vars:\n\
-         - ENKI_MODEL=model-id\n\
+         - ENKI_MODEL=provider::model\n\
          - ENKI_WORKSPACE=path\n\
          - ENKI_SESSION=session-id"
     );

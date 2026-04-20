@@ -1,15 +1,15 @@
-//! Multi-agent example — two agents share a registry and can discover each
-//! other.  The "coordinator" agent receives the user prompt and the
+//! Multi-agent example - two agents share a registry and can discover each
+//! other. The "coordinator" agent receives the user prompt and the
 //! "researcher" agent is available as a peer.
 //!
 //! ```powershell
 //! $env:ENKI_MODEL="ollama::qwen3.5"   # or any supported provider::model
-//! cargo run --example multi_agent -- "Summarize the repository structure"
+//! cargo run -p enki-next --example multi_agent -- "Summarize the repository structure"
 //! ```
 //!
 //! Optional env vars:
-//!   ENKI_MODEL      — model string (default: ollama::qwen3.5)
-//!   ENKI_WORKSPACE  — workspace root (default: crates/core/examples/.agent-workspace)
+//!   ENKI_MODEL      - model string (default: ollama::qwen3.5)
+//!   ENKI_WORKSPACE  - workspace root (default: crates/core/examples/.agent-workspace)
 
 use enki_next::agent::AgentDefinition;
 use enki_next::runtime::MultiAgentRuntime;
@@ -43,7 +43,7 @@ async fn main() {
         .unwrap_or_else(|| PathBuf::from("crates/core/examples/.agent-workspace"));
     let model = env::var("ENKI_MODEL").unwrap_or_else(|_| "ollama::qwen3.5".to_string());
 
-    // ── Agent definitions ──────────────────────────────────────────────
+    // Agent definitions
 
     let coordinator_def = AgentDefinition {
         name: "Coordinator".to_string(),
@@ -68,7 +68,7 @@ async fn main() {
         max_iterations: 50,
     };
 
-    // ── Build the multi-agent runtime ──────────────────────────────────
+    // Build the multi-agent runtime
 
     let runtime = match MultiAgentRuntime::builder()
         .add_agent(
@@ -92,18 +92,18 @@ async fn main() {
         }
     };
 
-    // ── Show registered agents ─────────────────────────────────────────
+    // Show registered agents
 
     println!("=== Registered Agents ===");
     for card in runtime.registry().list_all().await {
         println!(
-            "  • {} (id={}, capabilities={:?}, status={})",
+            "  - {} (id={}, capabilities={:?}, status={})",
             card.name, card.agent_id, card.capabilities, card.status
         );
     }
     println!();
 
-    // ── Send the prompt to the coordinator ─────────────────────────────
+    // Send the prompt to the coordinator
 
     println!("Prompt: {prompt}");
     print!("Running coordinator agent...");
