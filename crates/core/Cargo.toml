@@ -1,5 +1,5 @@
 [package]
-name = "core"
+name = "enki"
 version.workspace = true
 edition.workspace = true
 description = "Enki's Rust agent runtime, workflow engine, and shared core abstractions."
