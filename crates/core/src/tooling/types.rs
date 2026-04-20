@@ -14,7 +14,7 @@ pub trait AskHumanFn: 'static {
     async fn ask(&self, query: &str) -> Result<String, String>;
 }
 
-pub type ToolRegistry = BTreeMap<String, Box<dyn Tool>>;
+pub type ToolRegistry = BTreeMap<String, Arc<dyn Tool>>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowToolContext {
@@ -146,12 +146,23 @@ impl ToolRegistryBuilder {
     where
         T: Tool + 'static,
     {
-        self.tools.insert(tool.name().to_string(), Box::new(tool));
+        self.tools.insert(tool.name().to_string(), Arc::new(tool));
         self
     }
 
     pub fn register_boxed(mut self, tool: Box<dyn Tool>) -> Self {
+        self.tools
+            .insert(tool.name().to_string(), Arc::<dyn Tool>::from(tool));
+        self
+    }
+
+    pub fn register_shared(mut self, tool: Arc<dyn Tool>) -> Self {
         self.tools.insert(tool.name().to_string(), tool);
+        self
+    }
+
+    pub fn extend(mut self, mut registry: ToolRegistry) -> Self {
+        self.tools.append(&mut registry);
         self
     }
 

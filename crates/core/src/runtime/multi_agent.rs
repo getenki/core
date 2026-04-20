@@ -335,11 +335,11 @@ impl MultiAgentRuntimeBuilder {
             // The actual delegate_fn is wired below in Phase 3.
             tool_registry.insert(
                 "discover_agents".to_string(),
-                Box::new(DiscoverAgentsTool) as Box<dyn Tool>,
+                Arc::new(DiscoverAgentsTool) as Arc<dyn Tool>,
             );
             tool_registry.insert(
                 "delegate_task".to_string(),
-                Box::new(DelegateTaskTool) as Box<dyn Tool>,
+                Arc::new(DelegateTaskTool) as Arc<dyn Tool>,
             );
 
             let tool_executor = spec

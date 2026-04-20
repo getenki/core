@@ -1,5 +1,5 @@
 from . import enki_py as _low_level
-from .agent import Agent, AgentCard, AgentLoopRequest, AgentLoopResult, AgentRunResult, ExecutionStep, LiteLlmProvider, LlmProviderBackend, MemoryBackend, MemoryEntry, MemoryKind, MemoryModule, MultiAgentMember, MultiAgentRuntime, RunContext, Tool
+from .agent import Agent, AgentCard, AgentLoopRequest, AgentLoopResult, AgentRunResult, ExecutionStep, LiteLlmProvider, LlmProviderBackend, MemoryBackend, MemoryEntry, MemoryKind, MemoryModule, MultiAgentMember, MultiAgentRuntime, RunContext, Tool, ToolRegistry
 from .enki_py import *
 
 __doc__ = _low_level.__doc__
@@ -20,6 +20,7 @@ __all__ = list(getattr(_low_level, "__all__", [])) + [
     "MultiAgentRuntime",
     "RunContext",
     "Tool",
+    "ToolRegistry",
 ]
 
 if "EnkiTool" in globals() and "EnkiToolSpec" not in globals():

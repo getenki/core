@@ -89,6 +89,10 @@ struct RunRequest {
 
 enum AgentWorkerMessage {
   Run(RunRequest),
+  ConnectToolRegistry {
+    tools: Vec<ResolvedToolDefinition>,
+    reply_tx: mpsc::Sender<Result<(), String>>,
+  },
   SetLoopHandler {
     handler: Arc<dyn ExternalAgentLoopHandler>,
     reply_tx: mpsc::Sender<Result<(), String>>,
@@ -271,6 +275,7 @@ pub enum JsAgentStatus {
   Offline,
 }
 
+#[derive(Clone)]
 struct ResolvedToolDefinition {
   name: String,
   description: String,
@@ -333,6 +338,11 @@ pub struct JsAgentRunResult {
 #[napi(js_name = "NativeEnkiAgent")]
 pub struct NativeEnkiAgent {
   inner: Arc<AgentHandle>,
+}
+
+#[napi(js_name = "NativeToolRegistry")]
+pub struct NativeToolRegistry {
+  tools: Mutex<Vec<ResolvedToolDefinition>>,
 }
 
 #[napi(js_name = "NativeMultiAgentRuntime")]
@@ -607,6 +617,32 @@ impl NativeEnkiAgent {
     )
   }
 
+  #[napi(factory, js_name = "withToolRegistry")]
+  #[allow(clippy::too_many_arguments)]
+  pub fn with_tool_registry(
+    name: Option<String>,
+    system_prompt_preamble: Option<String>,
+    model: Option<String>,
+    max_iterations: Option<u32>,
+    workspace_home: Option<String>,
+    tool_registry: ClassInstance<'_, NativeToolRegistry>,
+    agentic_loop: Option<String>,
+  ) -> napi::Result<Self> {
+    Self::build(
+      name,
+      system_prompt_preamble,
+      agentic_loop,
+      model,
+      max_iterations,
+      workspace_home,
+      WorkerConfig {
+        tools: tool_registry.snapshot()?,
+        memories: Vec::new(),
+        memory_handlers: None,
+      },
+    )
+  }
+
   #[napi(factory, js_name = "withMemory")]
   #[allow(clippy::too_many_arguments)]
   pub fn with_memory(
@@ -720,6 +756,72 @@ impl NativeEnkiAgent {
   #[napi(js_name = "clearAgentLoopHandler")]
   pub fn clear_agent_loop_handler(&self) -> napi::Result<()> {
     self.inner.clear_agent_loop_handler()
+  }
+
+  #[napi(js_name = "connectToolRegistry")]
+  pub fn connect_tool_registry(
+    &self,
+    tool_registry: ClassInstance<'_, NativeToolRegistry>,
+  ) -> napi::Result<()> {
+    self.inner.connect_tool_registry(tool_registry.snapshot()?)
+  }
+}
+
+#[napi]
+impl NativeToolRegistry {
+  #[napi(constructor)]
+  pub fn new(
+    tools: Option<Vec<Object<'_>>>,
+    tool_handler: Option<SharedToolCallback<'_>>,
+  ) -> napi::Result<Self> {
+    Ok(Self {
+      tools: Mutex::new(resolve_tool_definitions(
+        tools.unwrap_or_default(),
+        tool_handler,
+      )?),
+    })
+  }
+
+  #[napi(js_name = "registerTools")]
+  pub fn register_tools(
+    &self,
+    tools: Vec<Object<'_>>,
+    tool_handler: Option<SharedToolCallback<'_>>,
+  ) -> napi::Result<()> {
+    let mut registry = self
+      .tools
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Tool registry mutex poisoned".to_string()))?;
+    registry.extend(resolve_tool_definitions(tools, tool_handler)?);
+    Ok(())
+  }
+
+  #[napi]
+  pub fn clear(&self) -> napi::Result<()> {
+    let mut registry = self
+      .tools
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Tool registry mutex poisoned".to_string()))?;
+    registry.clear();
+    Ok(())
+  }
+
+  #[napi(js_name = "toolNames")]
+  pub fn tool_names(&self) -> napi::Result<Vec<String>> {
+    let registry = self
+      .tools
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Tool registry mutex poisoned".to_string()))?;
+    Ok(registry.iter().map(|tool| tool.name.clone()).collect())
+  }
+
+  #[napi(getter)]
+  pub fn size(&self) -> napi::Result<u32> {
+    let registry = self
+      .tools
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Tool registry mutex poisoned".to_string()))?;
+    Ok(registry.len() as u32)
   }
 }
 
@@ -857,6 +959,16 @@ impl NativeEnkiAgent {
   }
 }
 
+impl NativeToolRegistry {
+  fn snapshot(&self) -> napi::Result<Vec<ResolvedToolDefinition>> {
+    self
+      .tools
+      .lock()
+      .map(|tools| tools.clone())
+      .map_err(|_| napi::Error::from_reason("Tool registry mutex poisoned".to_string()))
+  }
+}
+
 impl AgentHandle {
   fn configure_workflow(&self, agent_id: String, capabilities: Vec<String>) -> napi::Result<()> {
     let mut registration = self.workflow_registration.lock().map_err(|_| {
@@ -907,6 +1019,25 @@ impl AgentHandle {
   fn clear_agent_loop_handler(&self) -> napi::Result<()> {
     let (reply_tx, reply_rx) = mpsc::channel();
     let request = AgentWorkerMessage::ClearLoopHandler { reply_tx };
+
+    let sender = self
+      .request_tx
+      .lock()
+      .map_err(|_| napi::Error::from_reason("Worker error: request mutex poisoned".to_string()))?;
+
+    sender.send(request).map_err(|_| {
+      napi::Error::from_reason("Worker error: agent worker has stopped".to_string())
+    })?;
+
+    reply_rx
+      .recv()
+      .map_err(|_| napi::Error::from_reason("Worker error: reply channel dropped".to_string()))?
+      .map_err(napi::Error::from_reason)
+  }
+
+  fn connect_tool_registry(&self, tools: Vec<ResolvedToolDefinition>) -> napi::Result<()> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    let request = AgentWorkerMessage::ConnectToolRegistry { tools, reply_tx };
 
     let sender = self
       .request_tx
@@ -1343,7 +1474,7 @@ fn build_tool_registry(tools: Vec<ResolvedToolDefinition>) -> ToolRegistry {
     let name = tool.name;
     registry.insert(
       name.clone(),
-      Box::new(JsTool {
+      Arc::new(JsTool {
         name,
         description: tool.description,
         parameters: tool.parameters,
@@ -1469,6 +1600,10 @@ fn spawn_agent_worker(
             None,
           ));
           let _ = request.reply_tx.send(response);
+        }
+        AgentWorkerMessage::ConnectToolRegistry { tools, reply_tx } => {
+          agent.connect_tool_registry(build_tool_registry(tools));
+          let _ = reply_tx.send(Ok(()));
         }
         AgentWorkerMessage::SetLoopHandler { handler, reply_tx } => {
           agent.agent_loop = Box::new(CallbackAgentLoop::new(handler));

@@ -20,7 +20,7 @@ use crate::memory::MemoryManager;
 use crate::message::{IndexedValue, Message};
 use crate::tooling::builtin_tools;
 use crate::tooling::tool_calling::{RegistryToolExecutor, ToolCallRegistry, ToolExecutor};
-use crate::tooling::types::{ToolContext, ToolRegistry};
+use crate::tooling::types::{Tool, ToolContext, ToolRegistry};
 
 const CUSTOM_AGENTIC_LOOP_START: &str = "<enki:agentic-loop>";
 const CUSTOM_AGENTIC_LOOP_END: &str = "</enki:agentic-loop>";
@@ -51,6 +51,19 @@ impl Agent {
     pub fn with_agent_loop(mut self, agent_loop: Box<dyn AgentLoop>) -> Self {
         self.agent_loop = agent_loop;
         self
+    }
+
+    /// Merge a reusable tool registry into this agent after it has been constructed.
+    pub fn connect_tool_registry(&mut self, tool_registry: ToolRegistry) {
+        self.tool_registry.extend(tool_registry);
+    }
+
+    /// Register a single tool on an already-constructed agent.
+    pub fn connect_tool<T>(&mut self, tool: T)
+    where
+        T: Tool + 'static,
+    {
+        self.tool_registry.insert(tool);
     }
 
     fn with_builtin_tools(mut tool_registry: ToolRegistry) -> ToolRegistry {

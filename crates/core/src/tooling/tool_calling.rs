@@ -1,7 +1,9 @@
 use crate::tooling::types::{Tool, ToolContext, ToolRegistry};
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::sync::Arc;
 
+#[derive(Clone, Default)]
 pub struct ToolCallRegistry {
     tools: ToolRegistry,
 }
@@ -12,7 +14,26 @@ impl ToolCallRegistry {
     }
 
     pub fn get(&self, tool_name: &str) -> Option<&dyn Tool> {
-        self.tools.get(tool_name).map(Box::as_ref)
+        self.tools.get(tool_name).map(Arc::as_ref)
+    }
+
+    pub fn insert<T>(&mut self, tool: T)
+    where
+        T: Tool + 'static,
+    {
+        self.tools.insert(tool.name().to_string(), Arc::new(tool));
+    }
+
+    pub fn insert_shared(&mut self, tool: Arc<dyn Tool>) {
+        self.tools.insert(tool.name().to_string(), tool);
+    }
+
+    pub fn extend(&mut self, mut tool_registry: ToolRegistry) {
+        self.tools.append(&mut tool_registry);
+    }
+
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools.keys().cloned().collect()
     }
 
     pub fn catalog_json(&self) -> Value {

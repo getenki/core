@@ -3,7 +3,9 @@ use crate::agent::core::Agent;
 use crate::llm::{
     ChatMessage, LlmConfig, LlmError, LlmProvider, LlmResponse, Result as LlmResult, ToolDefinition,
 };
-use crate::tooling::types::{Tool, ToolContext, ToolRegistryBuilder, parse_tool_args};
+use crate::tooling::types::{
+    Tool, ToolContext, ToolRegistry, ToolRegistryBuilder, parse_tool_args,
+};
 use async_trait::async_trait;
 use futures::stream;
 use serde::Deserialize;
@@ -366,6 +368,51 @@ async fn custom_tool_registry_is_merged_with_builtin_tools() {
     assert_eq!(
         agent.run("session-a", "hello").await,
         "Merged tools enabled"
+    );
+
+    let requested_tools = llm.requested_tools();
+    assert_eq!(requested_tools.len(), 1);
+    let tool_names = requested_tools[0]
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(tool_names, vec!["echo", "exec", "read_file", "write_file"]);
+}
+
+#[tokio::test]
+async fn tool_registry_can_be_connected_after_agent_construction() {
+    let home = temp_home("dynamic-tool-registry");
+    let llm = RecordingLlm::new(vec![LlmResponse {
+        content: "Dynamic tools enabled".to_string(),
+        usage: None,
+        tool_calls: Vec::new(),
+        model: "recording".to_string(),
+        finish_reason: Some("stop".to_string()),
+    }]);
+
+    let mut agent = Agent::with_definition_tool_registry_executor_llm_and_workspace(
+        AgentDefinition::default(),
+        ToolRegistry::new(),
+        Box::new(crate::tooling::tool_calling::RegistryToolExecutor),
+        Some(Box::new(llm.clone())),
+        None,
+        Some(home),
+    )
+    .await
+    .unwrap();
+
+    let registry = ToolRegistryBuilder::new().register(EchoTool).build();
+    agent.connect_tool_registry(registry.clone());
+
+    assert!(
+        agent
+            .tool_registry
+            .tool_names()
+            .contains(&"echo".to_string())
+    );
+    assert_eq!(
+        agent.run("session-a", "hello").await,
+        "Dynamic tools enabled"
     );
 
     let requested_tools = llm.requested_tools();

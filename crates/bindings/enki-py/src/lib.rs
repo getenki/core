@@ -176,7 +176,7 @@ fn build_tool_registry(
         let name = tool.name;
         registry.insert(
             name.clone(),
-            Box::new(PythonTool {
+            Arc::new(PythonTool {
                 name,
                 description: tool.description,
                 parameters,
