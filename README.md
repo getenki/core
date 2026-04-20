@@ -186,6 +186,34 @@ npm run start:multi-agent-tools-memory
 
 These examples default to `ollama::qwen3.5:latest` unless `ENKI_MODEL` is set.
 
+## Custom Agentic Loops
+
+Enki supports two customization levels for agent loops:
+
+- prompt-level customization that replaces the default loop instructions while keeping the built-in Rust runtime loop
+- full loop overrides where Python or JavaScript owns the turn-by-turn loop and returns execution steps directly
+
+JavaScript examples:
+
+- `example/basic-js/custom-agent-loop.js`: uses `agent.setAgentLoopHandler(...)` to return a final response directly from JavaScript
+- `example/basic-js/react-custom-agent-loop.js`: uses `agent.setAgentLoopHandler(...)` to run a JavaScript-managed ReAct loop with direct LLM calls
+
+Python examples:
+
+- `example/enki-py/custom_agentic_loop.py`: uses `agent_loop_handler=` to return a final response directly from Python
+- `example/enki-py/react_custom_agentic_loop.py`: uses `agent_loop_handler=` to run a Python-managed ReAct loop with direct LLM calls
+- `example/enki-py/compare_agent_loops.py`: compares the default loop, prompt-customized loop, and Python-defined loop handlers side by side
+
+If you only want to change the instructions the model sees, use:
+
+- JavaScript: the optional `agenticLoop` constructor argument on `NativeEnkiAgent`
+- Python: the optional `agentic_loop=` constructor argument on `Agent`
+
+If you want your application code to control the loop itself, use:
+
+- JavaScript: `agent.setAgentLoopHandler(...)`
+- Python: `agent_loop_handler=` or `agent.set_agent_loop_handler(...)`
+
 ## Python API
 
 The published docs describe two Python layers:

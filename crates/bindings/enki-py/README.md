@@ -42,6 +42,8 @@ uv add "enki-py[litellm]"
 The main Python-facing exports are:
 
 - `Agent`
+- `AgentLoopRequest`
+- `AgentLoopResult`
 - `AgentRunResult`
 - `ExecutionStep`
 - `Tool`
@@ -73,7 +75,8 @@ The generated module is also re-exported, so lower-level runtime types remain av
 - `model`: required provider and model string
 - `deps_type`: optional dependency type used with `RunContext`
 - `instructions`: system guidance / prompt preamble
-- `agentic_loop`: optional custom loop instructions
+- `agentic_loop`: optional prompt-level loop instructions
+- `agent_loop_handler`: optional Python callback that overrides the runtime loop
 - `name`: display name for the agent
 - `max_iterations`: iteration cap for the runtime loop
 - `workspace_home`: optional workspace root for persisted runtime state
@@ -85,6 +88,8 @@ Main methods:
 
 - `run(...)`: async single-agent execution
 - `run_sync(...)`: sync wrapper around `run(...)`
+- `set_agent_loop_handler(...)`
+- `clear_agent_loop_handler(...)`
 - `tool_plain(...)`: decorator for plain Python tools
 - `tool(...)`: decorator for tools that receive `RunContext`
 - `register_tool(...)`
@@ -442,7 +447,9 @@ The repository workflow example also includes a custom `OllamaProvider` implemen
 
 ## Custom Agentic Loop
 
-You can override the default loop instructions with `agentic_loop=`:
+There are two different customization levels.
+
+Use `agentic_loop=` when you want to keep the normal Rust runtime loop but replace the default loop instructions that the model sees:
 
 ```python
 from enki_py import Agent
@@ -462,7 +469,57 @@ agent = Agent(
 )
 ```
 
-See [`example/enki-py/custom_agentic_loop.py`](../../../example/enki-py/custom_agentic_loop.py).
+Use `agent_loop_handler=` when you want Python to own the turn-by-turn control flow:
+
+```python
+from enki_py import Agent, AgentLoopRequest, AgentLoopResult, ExecutionStep
+
+
+def custom_loop(request: AgentLoopRequest[None]) -> AgentLoopResult:
+    return AgentLoopResult(
+        output=f"Handled in Python for: {request.user_message}",
+        steps=[
+            ExecutionStep(
+                index=1,
+                phase="Custom",
+                kind="final",
+                detail="Returned a final answer from Python",
+            )
+        ],
+    )
+
+
+agent = Agent(
+    "ollama::qwen3.5:latest",
+    instructions="Answer clearly and keep responses short.",
+    agent_loop_handler=custom_loop,
+)
+```
+
+The loop request includes:
+
+- `session_id`
+- `user_message`
+- `system_prompt`
+- `messages`
+- `tools`
+- `agent_dir`
+- `workspace_dir`
+- `sessions_dir`
+- `model`
+- `max_iterations`
+- `deps`
+
+You can also update the loop handler after construction with:
+
+- `agent.set_agent_loop_handler(handler)`
+- `agent.clear_agent_loop_handler()`
+
+Repository examples:
+
+- [`example/enki-py/custom_agentic_loop.py`](../../../example/enki-py/custom_agentic_loop.py)
+- [`example/enki-py/react_custom_agentic_loop.py`](../../../example/enki-py/react_custom_agentic_loop.py)
+- [`example/enki-py/compare_agent_loops.py`](../../../example/enki-py/compare_agent_loops.py)
 
 ## Running The Examples
 
@@ -475,6 +532,9 @@ python example\enki-py\simple_multi_agent.py
 python example\enki-py\multi_agent_with_memory_and_tools.py
 python example\enki-py\agent_workflow.py
 python example\enki-py\human_intervention_workflow.py
+python example\enki-py\custom_agentic_loop.py
+python example\enki-py\react_custom_agentic_loop.py
+python example\enki-py\compare_agent_loops.py
 ```
 
 Model notes:
