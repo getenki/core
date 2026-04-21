@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "enki-cli"
-version = "0.5.80"
+version = "0.5.81"
 dependencies = [
  "async-trait",
  "clap",
@@ -395,7 +395,7 @@ dependencies = [
 
 [[package]]
 name = "enki-next"
-version = "0.5.80"
+version = "0.5.81"
 dependencies = [
  "async-trait",
  "futures",
@@ -409,7 +409,7 @@ dependencies = [
 
 [[package]]
 name = "enki-py"
-version = "0.5.80"
+version = "0.5.81"
 dependencies = [
  "async-trait",
  "enki-next",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "enki_js"
-version = "0.5.80"
+version = "0.5.81"
 dependencies = [
  "async-trait",
  "enki-next",
