@@ -83,7 +83,8 @@ type LoopCallback<'scope> = Function<'scope, FnArgs<(String,)>, String>;
 struct RunRequest {
   session_id: String,
   user_message: String,
-  exec_ctx: AgentExecutionContext,
+  workspace_dir: Option<PathBuf>,
+  workflow: Option<WorkflowToolContext>,
   reply_tx: mpsc::Sender<CoreAgentRunResult>,
 }
 
@@ -1064,7 +1065,8 @@ impl AgentHandle {
     let request = AgentWorkerMessage::Run(RunRequest {
       session_id,
       user_message,
-      exec_ctx,
+      workspace_dir: exec_ctx.workspace_dir,
+      workflow: exec_ctx.workflow,
       reply_tx,
     });
 
@@ -1596,7 +1598,11 @@ fn spawn_agent_worker(
           let response = runtime.block_on(agent.run_detailed_with_context(
             &request.session_id,
             &request.user_message,
-            request.exec_ctx,
+            AgentExecutionContext {
+              workspace_dir: request.workspace_dir,
+              workflow: request.workflow,
+              delegation: None,
+            },
             None,
           ));
           let _ = request.reply_tx.send(response);
@@ -1992,6 +1998,7 @@ impl WorkflowTaskRunner for BindingWorkflowTaskRunner {
         AgentExecutionContext {
           workspace_dir: Some(workspace_dir.to_path_buf()),
           workflow: Some(metadata.clone()),
+          delegation: None,
         },
       )
       .map_err(|error| error.to_string())?;

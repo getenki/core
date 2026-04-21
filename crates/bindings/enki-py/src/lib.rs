@@ -361,7 +361,8 @@ impl LlmProvider for PythonLlmProvider {
 struct RunRequest {
     session_id: String,
     user_message: String,
-    exec_ctx: AgentExecutionContext,
+    workspace_dir: Option<PathBuf>,
+    workflow: Option<WorkflowToolContext>,
     on_step: Option<std::sync::Arc<dyn Fn(CoreExecutionStep) + Send + Sync>>,
     reply_tx: tokio::sync::oneshot::Sender<CoreAgentRunResult>,
 }
@@ -829,7 +830,11 @@ impl EnkiAgent {
                         let response = runtime.block_on(agent.run_detailed_with_context(
                             &request.session_id,
                             &request.user_message,
-                            request.exec_ctx,
+                            AgentExecutionContext {
+                                workspace_dir: request.workspace_dir,
+                                workflow: request.workflow,
+                                delegation: None,
+                            },
                             request.on_step,
                         ));
                         let _ = request.reply_tx.send(response);
@@ -996,7 +1001,11 @@ impl EnkiAgent {
                         let response = runtime.block_on(agent.run_detailed_with_context(
                             &request.session_id,
                             &request.user_message,
-                            request.exec_ctx,
+                            AgentExecutionContext {
+                                workspace_dir: request.workspace_dir,
+                                workflow: request.workflow,
+                                delegation: None,
+                            },
                             request.on_step,
                         ));
                         let _ = request.reply_tx.send(response);
@@ -1023,14 +1032,10 @@ impl EnkiAgent {
     }
 
     pub async fn run(&self, session_id: String, user_message: String) -> String {
-        self.run_core(
-            session_id,
-            user_message,
-            AgentExecutionContext::default(),
-            None,
-        )
-        .await
-        .content
+        self
+            .run_core(session_id, user_message, None, None, None)
+            .await
+            .content
     }
 
     pub async fn run_with_trace(
@@ -1042,7 +1047,8 @@ impl EnkiAgent {
             self.run_core(
                 session_id,
                 user_message,
-                AgentExecutionContext::default(),
+                None,
+                None,
                 None,
             )
             .await,
@@ -1064,7 +1070,8 @@ impl EnkiAgent {
             self.run_core(
                 session_id,
                 user_message,
-                AgentExecutionContext::default(),
+                None,
+                None,
                 Some(step_closure),
             )
             .await,
@@ -1082,14 +1089,16 @@ impl EnkiAgent {
         &self,
         session_id: String,
         user_message: String,
-        exec_ctx: AgentExecutionContext,
+        workspace_dir: Option<PathBuf>,
+        workflow: Option<WorkflowToolContext>,
         on_step: Option<std::sync::Arc<dyn Fn(CoreExecutionStep) + Send + Sync>>,
     ) -> CoreAgentRunResult {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let request = AgentWorkerMessage::Run(RunRequest {
             session_id,
             user_message,
-            exec_ctx,
+            workspace_dir,
+            workflow,
             on_step,
             reply_tx,
         });
@@ -1388,10 +1397,8 @@ impl WorkflowTaskRunner for BindingWorkflowTaskRunner {
             .run_core(
                 session_id.clone(),
                 prompt.to_string(),
-                AgentExecutionContext {
-                    workspace_dir: Some(workspace_dir.to_path_buf()),
-                    workflow: Some(metadata.clone()),
-                },
+                Some(workspace_dir.to_path_buf()),
+                Some(metadata.clone()),
                 None,
             )
             .await;
